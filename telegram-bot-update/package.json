@@ -1,0 +1,30 @@
+{
+  "name": "osh-equipment-server",
+  "version": "1.0.0",
+  "description": "OSH Equipment Management System - Backend (Express + Firestore + Local Image Storage)",
+  "main": "app.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node app.js",
+    "dev": "nodemon app.js",
+    "backup": "node scripts/backup.js",
+    "bot": "node telegramBot/bot.js",
+    "bot:dev": "nodemon telegramBot/bot.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "multer": "^1.4.5-lts.1",
+    "firebase-admin": "^12.3.1",
+    "qrcode": "^1.5.4",
+    "archiver": "^7.0.1",
+    "morgan": "^1.10.0",
+    "uuid": "^9.0.1",
+    "node-telegram-bot-api": "^0.66.0",
+    "exceljs": "^4.4.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.4"
+  }
+}

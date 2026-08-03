@@ -1,0 +1,10 @@
+{
+  "$schema": "https://railway.com/railway.schema.json",
+  "deploy": {
+    "startCommand": "node telegramBot/bot.js",
+    "restartPolicy": {
+      "maxRetries": 10,
+      "retryDelay": 5
+    }
+  }
+}

@@ -1,0 +1,8 @@
+node_modules/
+.env
+firebase/serviceAccountKey.json
+uploads/equipment/*
+!uploads/equipment/.gitkeep
+uploads/qr-codes/*
+!uploads/qr-codes/.gitkeep
+backups/*
