@@ -12,28 +12,31 @@ const {
   generateBorrowerReport,
   generateStockHistoryReport,
 } = require("./reportService");
+const authStore = require("./authStore");
 
 const TOKEN = process.env.TELEGRAM_BOT_TOKEN;
-const ALLOWED_IDS = (process.env.ALLOWED_TELEGRAM_IDS || "")
-  .split(",")
-  .map((id) => id.trim())
-  .filter(Boolean);
 
 if (!TOKEN) {
   console.error("[TelegramBot] Missing TELEGRAM_BOT_TOKEN in .env");
   process.exit(1);
 }
 
-if (ALLOWED_IDS.length === 0) {
+if (authStore.ADMIN_IDS.length === 0) {
   console.warn(
-    "[TelegramBot] WARNING: ALLOWED_TELEGRAM_IDS is empty — the bot will reject everyone. " +
-    "Add your Telegram numeric user ID(s) to .env (comma-separated for you + your colleague)."
+    "[TelegramBot] WARNING: ALLOWED_TELEGRAM_IDS is empty — no admin can run /adduser, " +
+    "and the bot will reject everyone. Add your Telegram numeric user ID(s) (comma-separated)."
   );
 }
 
 const bot = new TelegramBot(TOKEN, { polling: true });
 const EQUIPMENT_DIR = path.join(__dirname, "..", "uploads", "equipment");
 const STOCK_PER_PAGE = 8;
+
+// Load the Firestore allowlist so non-admin users can be authorized. Admins (env)
+// work immediately regardless; this just populates the cache for added users.
+authStore.load().catch((err) =>
+  console.error("[TelegramBot] Could not load user allowlist:", err.message)
+);
 
 // ---------- "/" command menu (the autocomplete suggestions Telegram shows when you type /) ----------
 const COMMANDS_EN = [
@@ -51,6 +54,9 @@ const COMMANDS_EN = [
   { command: "language", description: "Switch the bot language" },
   { command: "cancel", description: "Cancel the current flow" },
   { command: "skip", description: "Skip the photo in the /add flow" },
+  { command: "adduser", description: "Admin: allow a user — /adduser <id> [name]" },
+  { command: "removeuser", description: "Admin: remove a user — /removeuser <id>" },
+  { command: "listusers", description: "Admin: list allowed users" },
 ];
 
 const COMMANDS_KM = [
@@ -68,6 +74,9 @@ const COMMANDS_KM = [
   { command: "language", description: "ប្ដូរភាសា bot" },
   { command: "cancel", description: "បោះបង់ flow បច្ចុប្បន្ន" },
   { command: "skip", description: "រំលងរូបភាពក្នុង /add" },
+  { command: "adduser", description: "Admin៖ អនុញ្ញាតអ្នកប្រើ — /adduser <id> [ឈ្មោះ]" },
+  { command: "removeuser", description: "Admin៖ លុបអ្នកប្រើ — /removeuser <id>" },
+  { command: "listusers", description: "Admin៖ បង្ហាញអ្នកប្រើដែលបានអនុញ្ញាត" },
 ];
 
 // Default menu — Khmer.
@@ -171,15 +180,23 @@ function setChatLanguage(chatId, code) {
 }
 
 function isAuthorized(msg) {
-  return ALLOWED_IDS.includes(String(msg.from.id));
+  return authStore.isAuthorizedId(msg.from.id);
 }
 
 function userAuthorized(from) {
-  return ALLOWED_IDS.includes(String(from.id));
+  return authStore.isAuthorizedId(from.id);
 }
 
-function reject(chatId) {
-  bot.sendMessage(chatId, `${TEXT.en.unauthorized}\n${TEXT.en.unauthorizedHint}`);
+function reject(msg) {
+  const id = msg.from.id;
+  bot.sendMessage(
+    msg.chat.id,
+    tr(
+      msg.chat.id,
+      `${TEXT.en.unauthorized}\nYour Telegram ID is ${id}. Ask an admin to run: /adduser ${id}`,
+      `${TEXT.km.unauthorized}\nTelegram ID របស់អ្នកគឺ ${id}។ សូមឲ្យ admin រត់៖ /adduser ${id}`
+    )
+  );
 }
 
 // Escape Markdown special chars in user-provided values so names with *, _, etc.
@@ -370,7 +387,7 @@ function sendReturnResult(chatId, result, qty, equipmentName, borrowerName) {
 
 // ---------- /start & /help ----------
 bot.onText(/\/start/, (msg) => {
-  if (!isAuthorized(msg)) return reject(msg.chat.id);
+  if (!isAuthorized(msg)) return reject(msg);
   const chatId = msg.chat.id;
   bot.sendMessage(chatId, t(chatId, "ready"), {
     reply_markup: {
@@ -390,7 +407,7 @@ bot.onText(/\/start/, (msg) => {
 });
 
 bot.onText(/^\/language(?:@\w+)?(?:\s+(en|km))?$/i, (msg, match) => {
-  if (!isAuthorized(msg)) return reject(msg.chat.id);
+  if (!isAuthorized(msg)) return reject(msg);
   const chatId = msg.chat.id;
   const choice = (match[1] || "").toLowerCase();
   if (!choice) {
@@ -403,7 +420,7 @@ bot.onText(/^\/language(?:@\w+)?(?:\s+(en|km))?$/i, (msg, match) => {
 });
 
 bot.onText(/\/help/, (msg) => {
-  if (!isAuthorized(msg)) return reject(msg.chat.id);
+  if (!isAuthorized(msg)) return reject(msg);
   sendHelp(msg.chat.id);
 });
 
@@ -426,6 +443,11 @@ function sendHelp(chatId) {
         "/language — switch the bot language",
         "/cancel — cancel the current flow",
         "",
+        "User management (admin only):",
+        "/adduser <id> [name] — allow a new user to use the bot",
+        "/removeuser <id> — remove a user's access",
+        "/listusers — list admins + allowed users",
+        "",
         "Tip: you can also tap the buttons under any item instead of typing commands.",
       ]
     : [
@@ -444,6 +466,11 @@ function sendHelp(chatId) {
         "/language — ប្ដូរភាសា bot",
         "/cancel — បោះបង់ flow បច្ចុប្បន្ន",
         "",
+        "ការគ្រប់គ្រងអ្នកប្រើ (សម្រាប់ admin ប៉ុណ្ណោះ)៖",
+        "/adduser <id> [ឈ្មោះ] — អនុញ្ញាតអ្នកប្រើថ្មីឲ្យប្រើ bot",
+        "/removeuser <id> — លុបសិទ្ធិអ្នកប្រើ",
+        "/listusers — បង្ហាញ admin និងអ្នកប្រើដែលបានអនុញ្ញាត",
+        "",
         "ជំនួយ៖ អ្នកអាចចុចប៊ូតុងខាងក្រោមឧបករណ៍ ជំនួសការវាយបញ្ជា។",
       ];
 
@@ -451,7 +478,7 @@ function sendHelp(chatId) {
 }
 
 bot.onText(/^\/borrower(?:@\w+)?\s+(rename|hide|delete)\s+(.+)$/i, async (msg, match) => {
-  if (!isAuthorized(msg)) return reject(msg.chat.id);
+  if (!isAuthorized(msg)) return reject(msg);
   const chatId = msg.chat.id;
   const action = match[1].toLowerCase();
   const rawArgs = match[2].trim();
@@ -563,9 +590,90 @@ bot.onText(/\/cancel/, (msg) => {
   bot.sendMessage(msg.chat.id, t(msg.chat.id, "cancelled"));
 });
 
+// ---------- User management (admin only) ----------
+// Admins are the bootstrap IDs in ALLOWED_TELEGRAM_IDS. Added users live in the
+// Firestore botUsers collection so they can be granted access without a redeploy.
+function adminOnly(msg) {
+  return authStore.isAdmin(msg.from.id);
+}
+
+bot.onText(/^\/adduser(?:@\w+)?\s+(\d+)(?:\s+(.+))?$/i, async (msg, match) => {
+  if (!isAuthorized(msg)) return reject(msg);
+  if (!adminOnly(msg)) {
+    return bot.sendMessage(msg.chat.id, tr(msg.chat.id, "Admins only.", "សម្រាប់ admin ប៉ុណ្ណោះ។"));
+  }
+  const chatId = msg.chat.id;
+  const id = match[1];
+  const name = (match[2] || "").trim();
+  try {
+    const result = await authStore.addUser(id, name, msg.from.id);
+    if (result.error === "bad_id") {
+      return bot.sendMessage(chatId, tr(chatId, "Use: /adduser <telegram id> [name]", "ប្រើ៖ /adduser <telegram id> [ឈ្មោះ]"));
+    }
+    if (result.error === "is_admin") {
+      return bot.sendMessage(chatId, tr(chatId, `${id} is already an admin.`, `${id} គឺជា admin រួចហើយ។`));
+    }
+    if (result.error === "already_exists") {
+      return bot.sendMessage(chatId, tr(chatId, `${id} is already allowed.`, `${id} បានអនុញ្ញាតរួចហើយ។`));
+    }
+    return bot.sendMessage(
+      chatId,
+      tr(
+        chatId,
+        `✅ Added user ${id}${name ? ` (${name})` : ""}. They can use the bot now.`,
+        `✅ បានបន្ថែមអ្នកប្រើ ${id}${name ? ` (${name})` : ""}។ គេអាចប្រើ bot បានហើយ។`
+      )
+    );
+  } catch (err) {
+    bot.sendMessage(chatId, `${t(chatId, "error")}: ${err.message}`);
+  }
+});
+
+bot.onText(/^\/removeuser(?:@\w+)?\s+(\d+)$/i, async (msg, match) => {
+  if (!isAuthorized(msg)) return reject(msg);
+  if (!adminOnly(msg)) {
+    return bot.sendMessage(msg.chat.id, tr(msg.chat.id, "Admins only.", "សម្រាប់ admin ប៉ុណ្ណោះ។"));
+  }
+  const chatId = msg.chat.id;
+  const id = match[1];
+  try {
+    const result = await authStore.removeUser(id);
+    if (result.error === "is_admin") {
+      return bot.sendMessage(chatId, tr(chatId, `${id} is an admin and can't be removed.`, `${id} គឺជា admin មិនអាចលប់បានទេ។`));
+    }
+    if (result.error === "not_found") {
+      return bot.sendMessage(chatId, tr(chatId, `${id} is not in the allowlist.`, `${id} មិនមានក្នុងបញ្ជីអនុញ្ញាតទេ។`));
+    }
+    return bot.sendMessage(chatId, tr(chatId, `Removed user ${id}.`, `បានលុបអ្នកប្រើ ${id} រួចហើយ។`));
+  } catch (err) {
+    bot.sendMessage(chatId, `${t(chatId, "error")}: ${err.message}`);
+  }
+});
+
+bot.onText(/^\/listusers(?:@\w+)?$/i, async (msg) => {
+  if (!isAuthorized(msg)) return reject(msg);
+  if (!adminOnly(msg)) {
+    return bot.sendMessage(msg.chat.id, tr(msg.chat.id, "Admins only.", "សម្រាប់ admin ប៉ុណ្ណោះ។"));
+  }
+  const chatId = msg.chat.id;
+  try {
+    const users = await authStore.listUsers();
+    const adminLines = authStore.ADMIN_IDS.map((id) => `• ${id} (admin)`);
+    const userLines = users.length
+      ? users.map((u) => `• ${u.id}${u.name ? ` — ${u.name}` : ""}`)
+      : [tr(chatId, "(no added users yet)", "(មិនទាន់មានអ្នកប្រើទេ)")];
+    const body =
+      tr(chatId, "Admins:", "Admin៖") + "\n" + adminLines.join("\n") +
+      "\n\n" + tr(chatId, "Allowed users:", "អ្នកប្រើដែលបានអនុញ្ញាត៖") + "\n" + userLines.join("\n");
+    return bot.sendMessage(chatId, body);
+  } catch (err) {
+    bot.sendMessage(chatId, `${t(chatId, "error")}: ${err.message}`);
+  }
+});
+
 // ---------- /stock — paginated tappable list ----------
 bot.onText(/^\/stock(?:@\w+)?$/i, async (msg) => {
-  if (!isAuthorized(msg)) return reject(msg.chat.id);
+  if (!isAuthorized(msg)) return reject(msg);
   const chatId = msg.chat.id;
   try {
     const items = await equipmentService.getAll();
@@ -582,7 +690,7 @@ bot.onText(/^\/stock(?:@\w+)?$/i, async (msg) => {
 
 // ---------- /view <name> ----------
 bot.onText(/^\/view\s+(.+)$/i, async (msg, match) => {
-  if (!isAuthorized(msg)) return reject(msg.chat.id);
+  if (!isAuthorized(msg)) return reject(msg);
   const chatId = msg.chat.id;
   const equipmentName = match[1].trim();
   try {
@@ -596,7 +704,7 @@ bot.onText(/^\/view\s+(.+)$/i, async (msg, match) => {
 
 // ---------- /borrow <name> — starts a guided flow ----------
 bot.onText(/^\/borrow\s+(.+)$/i, async (msg, match) => {
-  if (!isAuthorized(msg)) return reject(msg.chat.id);
+  if (!isAuthorized(msg)) return reject(msg);
   const chatId = msg.chat.id;
   const equipmentName = match[1].trim();
   const item = await equipmentService.findByName(equipmentName);
@@ -608,7 +716,7 @@ bot.onText(/^\/borrow\s+(.+)$/i, async (msg, match) => {
 
 // ---------- /return <name> <qty> ----------
 bot.onText(/^\/return(?:@\w+)?\s+(.+)$/i, async (msg, match) => {
-  if (!isAuthorized(msg)) return reject(msg.chat.id);
+  if (!isAuthorized(msg)) return reject(msg);
   const chatId = msg.chat.id;
   const rawArgs = match[1].trim();
   const parts = rawArgs.split(/\s+/).filter(Boolean);
@@ -650,7 +758,7 @@ bot.onText(/^\/return(?:@\w+)?\s+(.+)$/i, async (msg, match) => {
 
 // ---------- /edit <name> <field> <value...> ----------
 bot.onText(/^\/edit\s+(.+)\s+(name|brand|model|serial|location|quantity|minstock|description)\s+(.+)$/i, async (msg, match) => {
-  if (!isAuthorized(msg)) return reject(msg.chat.id);
+  if (!isAuthorized(msg)) return reject(msg);
   const chatId = msg.chat.id;
   const [, equipmentName, field, value] = match;
 
@@ -667,7 +775,7 @@ bot.onText(/^\/edit\s+(.+)\s+(name|brand|model|serial|location|quantity|minstock
 
 // ---------- /delete <name> ----------
 bot.onText(/^\/delete\s+(.+)\s+confirm$/i, async (msg, match) => {
-  if (!isAuthorized(msg)) return reject(msg.chat.id);
+  if (!isAuthorized(msg)) return reject(msg);
   const chatId = msg.chat.id;
   const equipmentName = match[1].trim();
 
@@ -678,7 +786,7 @@ bot.onText(/^\/delete\s+(.+)\s+confirm$/i, async (msg, match) => {
 });
 
 bot.onText(/^\/delete\s+(.+)$/i, async (msg, match) => {
-  if (!isAuthorized(msg)) return reject(msg.chat.id);
+  if (!isAuthorized(msg)) return reject(msg);
   const chatId = msg.chat.id;
   const equipmentName = match[1].trim();
   const item = await equipmentService.findByName(equipmentName);
@@ -713,18 +821,18 @@ async function sendReportMenu(chatId) {
 }
 
 bot.onText(/^\/report(?:@\w+)?$/i, async (msg) => {
-  if (!isAuthorized(msg)) return reject(msg.chat.id);
+  if (!isAuthorized(msg)) return reject(msg);
   await sendReportMenu(msg.chat.id);
 });
 
 // Keep the typed variants working too.
 bot.onText(/^\/report(?:@\w+)?\s+borrowers$/i, async (msg) => {
-  if (!isAuthorized(msg)) return reject(msg.chat.id);
+  if (!isAuthorized(msg)) return reject(msg);
   await sendReport(msg.chat.id, "borrowers");
 });
 
 bot.onText(/^\/report(?:@\w+)?\s+stock$/i, async (msg) => {
-  if (!isAuthorized(msg)) return reject(msg.chat.id);
+  if (!isAuthorized(msg)) return reject(msg);
   await sendReport(msg.chat.id, "stock");
 });
 
@@ -760,13 +868,13 @@ async function sendReport(chatId, type) {
 
 // ---------- /add ----------
 bot.onText(/^\/add$/, (msg) => {
-  if (!isAuthorized(msg)) return reject(msg.chat.id);
+  if (!isAuthorized(msg)) return reject(msg);
   setSession(msg.chat.id, { flow: "add", step: "name", data: {} });
   bot.sendMessage(msg.chat.id, tr(msg.chat.id, "Let's add new equipment. What's the equipment name?", "តោះបញ្ចូលឧបករណ៍ថ្មី។ ឈ្មោះឧបករណ៍ជាអ្វី?"));
 });
 
 bot.onText(/^\/skip(?:@\w+)?$/i, async (msg) => {
-  if (!isAuthorized(msg)) return reject(msg.chat.id);
+  if (!isAuthorized(msg)) return reject(msg);
 
   const chatId = msg.chat.id;
   const session = getSession(chatId);
