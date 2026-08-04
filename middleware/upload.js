@@ -1,28 +1,12 @@
 const multer = require("multer");
-const path = require("path");
-const fs = require("fs");
-const { v4: uuidv4 } = require("uuid");
 
-const EQUIPMENT_DIR = path.join(__dirname, "..", "uploads", "equipment");
-
-if (!fs.existsSync(EQUIPMENT_DIR)) {
-  fs.mkdirSync(EQUIPMENT_DIR, { recursive: true });
-}
+// Equipment images are uploaded to Firebase Storage (not the local disk), so we keep
+// the uploaded file in memory as a buffer and hand it to storageService. This avoids
+// touching the ephemeral filesystem on Railway at all.
+const storage = multer.memoryStorage();
 
 const ALLOWED_TYPES = ["image/jpeg", "image/png", "image/webp", "image/jpg"];
 const MAX_FILE_SIZE_MB = 5;
-
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    cb(null, EQUIPMENT_DIR);
-  },
-  filename: (req, file, cb) => {
-    // Always rename to avoid collisions/duplicates
-    const ext = path.extname(file.originalname).toLowerCase();
-    const uniqueName = `${uuidv4()}${ext}`;
-    cb(null, uniqueName);
-  },
-});
 
 function fileFilter(req, file, cb) {
   if (!ALLOWED_TYPES.includes(file.mimetype)) {

@@ -1,6 +1,11 @@
 const { db, admin } = require("../firebase/firebaseAdmin");
-const { deleteEquipmentImage, deleteQrCode, PLACEHOLDER_PATH } = require("../services/fileService");
+const { deleteQrCode, PLACEHOLDER_PATH } = require("../services/fileService");
 const { generateEquipmentQrCode } = require("../services/qrService");
+const {
+  uploadEquipmentImage,
+  deleteStoredImage,
+  resolveImageUrl,
+} = require("../services/storageService");
 
 const COLLECTION = "equipment";
 const CLIENT_URL = process.env.CLIENT_URL || "http://localhost:5173";
@@ -9,12 +14,35 @@ function normalizeName(value) {
   return String(value || "").trim().toLowerCase();
 }
 
+// Map an uploaded file's mimetype to a file extension for Storage.
+function extFromMimetype(mimetype) {
+  switch ((mimetype || "").toLowerCase()) {
+    case "image/png":
+      return ".png";
+    case "image/webp":
+      return ".webp";
+    case "image/jpeg":
+    case "image/jpg":
+    default:
+      return ".jpg";
+  }
+}
+
+// Resolve an item's imagePath to a fetchable URL before sending it to the client.
+// Legacy /uploads/... and placeholder paths pass through unchanged (the client
+// prepends the API base). Storage paths become signed HTTPS URLs.
+async function withResolvedImage(item) {
+  if (!item) return item;
+  return { ...item, imagePath: await resolveImageUrl(item.imagePath) };
+}
+
 // GET /api/equipment
 async function getAllEquipment(req, res, next) {
   try {
     const snapshot = await db.collection(COLLECTION).orderBy("createdAt", "desc").get();
     const equipment = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
-    res.json(equipment);
+    const resolved = await Promise.all(equipment.map(withResolvedImage));
+    res.json(resolved);
   } catch (err) {
     next(err);
   }
@@ -27,7 +55,8 @@ async function getEquipmentById(req, res, next) {
     if (!doc.exists) {
       return res.status(404).json({ error: "Equipment not found." });
     }
-    res.json({ id: doc.id, ...doc.data() });
+    const item = { id: doc.id, ...doc.data() };
+    res.json(await withResolvedImage(item));
   } catch (err) {
     next(err);
   }
@@ -52,7 +81,14 @@ async function createEquipment(req, res, next) {
     }
 
     const total = Number(totalQuantity) || 0;
-    const imagePath = req.file ? `/uploads/equipment/${req.file.filename}` : PLACEHOLDER_PATH;
+    let imagePath = PLACEHOLDER_PATH;
+    if (req.file) {
+      const { storagePath } = await uploadEquipmentImage(req.file.buffer, {
+        ext: extFromMimetype(req.file.mimetype),
+        contentType: req.file.mimetype,
+      });
+      imagePath = storagePath;
+    }
 
     const docRef = await db.collection(COLLECTION).add({
       equipmentName,
@@ -82,7 +118,7 @@ async function createEquipment(req, res, next) {
     await docRef.update({ qrCodePath });
 
     const created = await docRef.get();
-    res.status(201).json({ id: docRef.id, ...created.data() });
+    res.status(201).json(await withResolvedImage({ id: docRef.id, ...created.data() }));
   } catch (err) {
     next(err);
   }
@@ -110,10 +146,14 @@ async function updateEquipment(req, res, next) {
       if (updates[f] !== undefined) updates[f] = Number(updates[f]);
     });
 
-    // If a new image was uploaded, replace the old one
+    // If a new image was uploaded, replace the old one (Storage or legacy disk).
     if (req.file) {
-      deleteEquipmentImage(existingData.imagePath);
-      updates.imagePath = `/uploads/equipment/${req.file.filename}`;
+      await deleteStoredImage(existingData.imagePath);
+      const { storagePath } = await uploadEquipmentImage(req.file.buffer, {
+        ext: extFromMimetype(req.file.mimetype),
+        contentType: req.file.mimetype,
+      });
+      updates.imagePath = storagePath;
     }
 
     // Auto status based on stock
@@ -127,7 +167,7 @@ async function updateEquipment(req, res, next) {
 
     await docRef.update(updates);
     const updated = await docRef.get();
-    res.json({ id: docRef.id, ...updated.data() });
+    res.json(await withResolvedImage({ id: docRef.id, ...updated.data() }));
   } catch (err) {
     next(err);
   }
@@ -144,7 +184,7 @@ async function deleteEquipment(req, res, next) {
     }
 
     const data = existing.data();
-    deleteEquipmentImage(data.imagePath);
+    await deleteStoredImage(data.imagePath);
     deleteQrCode(data.qrCodePath);
 
     await docRef.delete();
@@ -164,7 +204,7 @@ async function deleteEquipmentImageOnly(req, res, next) {
       return res.status(404).json({ error: "Equipment not found." });
     }
 
-    deleteEquipmentImage(existing.data().imagePath);
+    await deleteStoredImage(existing.data().imagePath);
     await docRef.update({ imagePath: PLACEHOLDER_PATH, updatedAt: admin.firestore.FieldValue.serverTimestamp() });
 
     res.json({ message: "Image removed, reverted to placeholder.", imagePath: PLACEHOLDER_PATH });

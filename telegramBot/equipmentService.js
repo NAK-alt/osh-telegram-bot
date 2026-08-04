@@ -1,6 +1,7 @@
 const { db, admin } = require("../firebase/firebaseAdmin");
 const { generateEquipmentQrCode } = require("../services/qrService");
-const { deleteEquipmentImage, deleteQrCode, PLACEHOLDER_PATH } = require("../services/fileService");
+const { deleteQrCode, PLACEHOLDER_PATH } = require("../services/fileService");
+const { deleteStoredImage } = require("../services/storageService");
 
 const COLLECTION = "equipment";
 const CLIENT_URL = process.env.CLIENT_URL || "http://localhost:5173";
@@ -463,7 +464,7 @@ async function deleteEquipmentByName(equipmentName) {
   const item = await findByName(equipmentName);
   if (!item) return { error: "not_found" };
 
-  deleteEquipmentImage(item.imagePath);
+  deleteStoredImage(item.imagePath);
   deleteQrCode(item.qrCodePath);
   await db.collection(COLLECTION).doc(item.id).delete();
 
@@ -474,7 +475,7 @@ async function attachImage(equipmentName, imagePath) {
   const item = await findByName(equipmentName);
   if (!item) return { error: "not_found" };
 
-  deleteEquipmentImage(item.imagePath);
+  deleteStoredImage(item.imagePath);
   await db.collection(COLLECTION).doc(item.id).update({
     imagePath,
     updatedAt: admin.firestore.FieldValue.serverTimestamp(),

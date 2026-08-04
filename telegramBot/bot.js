@@ -2,7 +2,8 @@ require("dotenv").config();
 const TelegramBot = require("node-telegram-bot-api");
 const path = require("path");
 const fs = require("fs");
-const { v4: uuidv4 } = require("uuid");
+const https = require("https");
+const storageService = require("../services/storageService");
 
 const { getSession, setSession, clearSession } = require("./sessionStore");
 const { getLanguage, setLanguage } = require("./languageStore");
@@ -341,26 +342,35 @@ async function sendView(chatId, item, { withMenu = true } = {}) {
   // formatItem returns HTML, so the caption must be parsed as HTML (not Markdown).
   const opts = { parse_mode: "HTML", reply_markup };
 
-  const realFile =
-    item.imagePath && item.imagePath !== "/uploads/placeholder.png"
-      ? path.join(EQUIPMENT_DIR, path.basename(item.imagePath))
-      : null;
-
-  // Try to send a photo: the item's real image first, then the placeholder, so the
-  // user still sees a picture even for items without a photo. If Telegram rejects
-  // every photo send (400 / invalid file), fall back to a plain text message so the
-  // item's details always show up instead of crashing with an "API error 400".
   const candidates = [];
-  if (realFile && fs.existsSync(realFile)) candidates.push(realFile);
+
+  // Storage-backed images resolve to a signed HTTPS URL -> send by URL (works on
+  // Railway, no local file needed). Legacy /uploads/equipment/... paths fall back to
+  // the file on disk (only present locally). Placeholder shows for no-image items.
+  if (item.imagePath && item.imagePath !== "/uploads/placeholder.png") {
+    try {
+      const resolved = await storageService.resolveImageUrl(item.imagePath);
+      if (resolved && /^https?:\/\//i.test(resolved)) {
+        candidates.push(resolved);
+      } else {
+        const realFile = path.join(EQUIPMENT_DIR, path.basename(item.imagePath));
+        if (fs.existsSync(realFile)) candidates.push(realFile);
+      }
+    } catch (err) {
+      console.error("[sendView] resolveImageUrl failed:", err && err.message ? err.message : err);
+    }
+  }
+
+  // Fallbacks: placeholder file, then a plain text message so details always show.
   if (fs.existsSync(PLACEHOLDER_FILE)) candidates.push(PLACEHOLDER_FILE);
 
-  for (const file of candidates) {
+  for (const candidate of candidates) {
     try {
-      await bot.sendPhoto(chatId, file, { caption, ...opts });
+      await bot.sendPhoto(chatId, candidate, { caption, ...opts });
       return;
     } catch (err) {
       console.error(
-        `[sendView] sendPhoto failed for ${path.basename(file)}:`,
+        `[sendView] sendPhoto failed for ${typeof candidate === "string" ? path.basename(candidate) : candidate}:`,
         err && err.message ? err.message : err
       );
     }
@@ -377,6 +387,27 @@ async function suggestOrWarn(chatId, query, action) {
   }
   return bot.sendMessage(chatId, t(chatId, "didYouMean"), {
     reply_markup: suggestKeyboard(matches, action),
+  });
+}
+
+// Download a Telegram photo by fileId into a Buffer (instead of to disk) so we can
+// hand the bytes straight to Firebase Storage. Uses https.get (Node-version
+// independent, no global-fetch assumption).
+function downloadTelegramFileAsBuffer(fileId) {
+  return new Promise((resolve, reject) => {
+    bot.getFileLink(fileId).then((fileUrl) => {
+      https.get(fileUrl, (response) => {
+        if (response.statusCode !== 200) {
+          reject(new Error(`Telegram file download failed (HTTP ${response.statusCode})`));
+          response.resume();
+          return;
+        }
+        const chunks = [];
+        response.on("data", (chunk) => chunks.push(chunk));
+        response.on("end", () => resolve(Buffer.concat(chunks)));
+        response.on("error", reject);
+      }).on("error", reject);
+    }).catch(reject);
   });
 }
 
@@ -1331,14 +1362,24 @@ bot.on("message", async (msg) => {
       if (session.step === "photo") {
         if (msg.photo && msg.photo.length > 0) {
           const fileId = msg.photo[msg.photo.length - 1].file_id; // largest size
-          const ext = ".jpg";
-          const filename = `${uuidv4()}${ext}`;
-          const destPath = path.join(EQUIPMENT_DIR, filename);
-
-          const downloadedPath = await bot.downloadFile(fileId, EQUIPMENT_DIR);
-          fs.renameSync(downloadedPath, destPath);
-
-          return finishAddFlow(chatId, session, `/uploads/equipment/${filename}`);
+          try {
+            const buffer = await downloadTelegramFileAsBuffer(fileId);
+            const { storagePath } = await storageService.uploadEquipmentImage(buffer, {
+              ext: ".jpg",
+              contentType: "image/jpeg",
+            });
+            return finishAddFlow(chatId, session, storagePath);
+          } catch (err) {
+            console.error("[TelegramBot] photo upload failed:", err);
+            return bot.sendMessage(
+              chatId,
+              tr(
+                chatId,
+                `Could not save the photo: ${err.message}. Try /add again or /skip.`,
+                `មិនអាចរក្សារូបភាព៖ ${err.message}។ សាក /add ម្ដងទៀត ឬ /skip។`
+              )
+            );
+          }
         }
 
         return bot.sendMessage(chatId, tr(chatId, "Send a photo, or type /skip.", "ផ្ញើរូបភាព ឬវាយ /skip។"));
