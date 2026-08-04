@@ -180,7 +180,7 @@ async function createEquipment({ name, quantity, imagePath }) {
     imagePath: imagePath || PLACEHOLDER_PATH,
     qrCodePath: null,
     status: computeStatus(total, 0),
-    description: "Added via Telegram bot",
+    description: "",
     borrowHistory: [],
     activeLoans: [],
     lastBorrowedBy: "",

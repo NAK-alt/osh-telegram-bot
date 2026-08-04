@@ -30,6 +30,7 @@ if (authStore.ADMIN_IDS.length === 0) {
 
 const bot = new TelegramBot(TOKEN, { polling: true });
 const EQUIPMENT_DIR = path.join(__dirname, "..", "uploads", "equipment");
+const PLACEHOLDER_FILE = path.join(__dirname, "..", "uploads", "placeholder.png");
 const STOCK_PER_PAGE = 8;
 
 // Load the Firestore allowlist so non-admin users can be authorized. Admins (env)
@@ -200,30 +201,45 @@ function reject(msg) {
 }
 
 // Escape Markdown special chars in user-provided values so names with *, _, etc.
-// don't break the message formatting.
+// don't break the message formatting. Used by the short status/confirm messages
+// that still use parse_mode: "Markdown".
 function esc(value) {
   return String(value ?? "").replace(/([*_`\[])/g, "\\$1");
 }
 
+// Escape for parse_mode: "HTML". Used by formatItem, which is rendered as the photo
+// caption — HTML is far more forgiving than Markdown (no unmatched-tag 400s).
+function escHtml(value) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
 function formatItem(item) {
-  const name = esc(item.equipmentName);
+  const name = escHtml(item.equipmentName);
+  // "Added via Telegram bot" is an internal default, not a real note — never show it.
+  const note =
+    item.description && item.description !== "Added via Telegram bot"
+      ? escHtml(item.description)
+      : "";
   return {
     en:
-      `*${name}*\n` +
+      `<b>${name}</b>\n` +
       `Available: ${item.availableQuantity} / ${item.totalQuantity}  |  Borrowed: ${item.borrowedQuantity}\n` +
       `Min Stock: ${item.minimumStockLevel}\n` +
       `Status: ${item.status}\n` +
-      (item.lastBorrowedBy ? `Last Borrowed By: ${esc(item.lastBorrowedBy)}\n` : "") +
-      (item.storageLocation ? `Location: ${esc(item.storageLocation)}\n` : "") +
-      (item.description ? `Notes: ${esc(item.description)}` : ""),
+      (item.lastBorrowedBy ? `Last Borrowed By: ${escHtml(item.lastBorrowedBy)}\n` : "") +
+      (item.storageLocation ? `Location: ${escHtml(item.storageLocation)}\n` : "") +
+      (note ? `Notes: ${note}` : ""),
     km:
-      `*${name}*\n` +
+      `<b>${name}</b>\n` +
       `មានសល់: ${item.availableQuantity} / ${item.totalQuantity}  |  ខ្ចីចេញ: ${item.borrowedQuantity}\n` +
       `ចំនួនអប្បបរមា: ${item.minimumStockLevel}\n` +
       `ស្ថានភាព: ${item.status}\n` +
-      (item.lastBorrowedBy ? `អ្នកខ្ចីចុងក្រោយ: ${esc(item.lastBorrowedBy)}\n` : "") +
-      (item.storageLocation ? `ទីតាំង: ${esc(item.storageLocation)}\n` : "") +
-      (item.description ? `កំណត់សម្គាល់: ${esc(item.description)}` : ""),
+      (item.lastBorrowedBy ? `អ្នកខ្ចីចុងក្រោយ: ${escHtml(item.lastBorrowedBy)}\n` : "") +
+      (item.storageLocation ? `ទីតាំង: ${escHtml(item.storageLocation)}\n` : "") +
+      (note ? `កំណត់សម្គាល់: ${note}` : ""),
   };
 }
 
@@ -321,19 +337,36 @@ function fillKeyboard(template, id) {
 async function sendView(chatId, item, { withMenu = true } = {}) {
   const currentLang = lang(chatId);
   const caption = formatItem(item)[currentLang];
-  const imageFile =
+  const reply_markup = withMenu ? fillKeyboard(viewMenuKeyboard(chatId), item.id) : undefined;
+  // formatItem returns HTML, so the caption must be parsed as HTML (not Markdown).
+  const opts = { parse_mode: "HTML", reply_markup };
+
+  const realFile =
     item.imagePath && item.imagePath !== "/uploads/placeholder.png"
       ? path.join(EQUIPMENT_DIR, path.basename(item.imagePath))
       : null;
 
-  const opts = { parse_mode: "Markdown" };
-  if (withMenu) opts.reply_markup = fillKeyboard(viewMenuKeyboard(chatId), item.id);
+  // Try to send a photo: the item's real image first, then the placeholder, so the
+  // user still sees a picture even for items without a photo. If Telegram rejects
+  // every photo send (400 / invalid file), fall back to a plain text message so the
+  // item's details always show up instead of crashing with an "API error 400".
+  const candidates = [];
+  if (realFile && fs.existsSync(realFile)) candidates.push(realFile);
+  if (fs.existsSync(PLACEHOLDER_FILE)) candidates.push(PLACEHOLDER_FILE);
 
-  if (imageFile && fs.existsSync(imageFile)) {
-    await bot.sendPhoto(chatId, imageFile, { caption, ...opts });
-  } else {
-    await bot.sendMessage(chatId, caption, opts);
+  for (const file of candidates) {
+    try {
+      await bot.sendPhoto(chatId, file, { caption, ...opts });
+      return;
+    } catch (err) {
+      console.error(
+        `[sendView] sendPhoto failed for ${path.basename(file)}:`,
+        err && err.message ? err.message : err
+      );
+    }
   }
+
+  await bot.sendMessage(chatId, caption, { parse_mode: "HTML", reply_markup });
 }
 
 // When an exact name lookup fails, show tappable "Did you mean …?" suggestions.
@@ -355,7 +388,7 @@ async function finishAddFlow(chatId, session, imagePath) {
   const created = await equipmentService.createEquipment(session.data);
   clearSession(chatId);
   const currentLang = lang(chatId);
-  return bot.sendMessage(chatId, `${tr(chatId, "Created!", "បានបង្កើតរួច!")}\n\n${formatItem(created)[currentLang]}`, { parse_mode: "Markdown" });
+  return bot.sendMessage(chatId, `${tr(chatId, "Created!", "បានបង្កើតរួច!")}\n\n${formatItem(created)[currentLang]}`, { parse_mode: "HTML" });
 }
 
 // Shared return-result rendering (used by both /return command and the button flow).
