@@ -2636,4 +2636,21 @@ bot.on("message", async (msg) => {
 
 bot.on("polling_error", (err) => console.error("[TelegramBot] polling error:", err.message));
 
+// Gracefully stop polling on SIGTERM / SIGINT so Railway rolling restarts don't trigger 409 Conflict errors
+const shutdown = (signal) => {
+  console.log(`[TelegramBot] Received ${signal}. Gracefully stopping Telegram polling...`);
+  bot.stopPolling()
+    .then(() => {
+      console.log("[TelegramBot] Polling stopped successfully.");
+      process.exit(0);
+    })
+    .catch((err) => {
+      console.error("[TelegramBot] Error stopping polling:", err.message);
+      process.exit(1);
+    });
+};
+
+process.on("SIGTERM", () => shutdown("SIGTERM"));
+process.on("SIGINT", () => shutdown("SIGINT"));
+
 console.log("[TelegramBot] Bot started and polling for messages.");
