@@ -1393,12 +1393,60 @@ async function sendOfficerPicker(chatId, prefix = "boroffpg", page = 0, item = n
   return { title, reply_markup: { inline_keyboard: rows } };
 }
 
-async function askBorrower(chatId, item, page = 0) {
-  const picker = await sendOfficerPicker(chatId, "boroffpg", page, item);
-  return bot.sendMessage(chatId, picker.title, {
+async function sendGroupSelector(chatId, item = null) {
+  const officers = await officerService.loadOfficers();
+  if (officers.length === 0) {
+    return bot.sendMessage(
+      chatId,
+      tr(chatId, "No officers found in directory.", "មិនមានទិន្នន័យមន្ត្រីក្នុងបញ្ជីទេ។"),
+      { reply_markup: { inline_keyboard: [[{ text: t(chatId, "cancel"), callback_data: "borm_cancel" }]] } }
+    );
+  }
+
+  const groups = Array.from(
+    new Set(officers.map((o) => o.group).filter(Boolean))
+  ).sort((a, b) => (parseInt(a, 10) || 999) - (parseInt(b, 10) || 999));
+
+  const rows = [];
+  for (let i = 0; i < groups.length; i += 4) {
+    const chunk = groups.slice(i, i + 4);
+    rows.push(
+      chunk.map((g) => ({
+        text: `ក្រុមទី ${g}`,
+        callback_data: `borgrp:${g}`,
+      }))
+    );
+  }
+
+  rows.push([
+    {
+      text: tr(chatId, `📋 Show All Officers (${officers.length})`, `📋 បង្ហាញមន្ត្រីទាំងអស់ (${officers.length} នាក់)`),
+      callback_data: "borgrp:all",
+    },
+  ]);
+  rows.push([{ text: t(chatId, "cancel"), callback_data: "borm_cancel" }]);
+
+  const itemName = item ? esc(item.equipmentName) : "";
+  const title = itemName
+    ? tr(
+        chatId,
+        `Select Group or type a name to search borrower for *${itemName}*:`,
+        `សូមជ្រើសរើសក្រុម ឬវាយឈ្មោះស្វែងរកអ្នកខ្ចីសម្រាប់ *${itemName}*៖`
+      )
+    : tr(
+        chatId,
+        `Select Group or type a name to search borrower:`,
+        `សូមជ្រើសរើសក្រុម ឬវាយឈ្មោះស្វែងរកអ្នកខ្ចី៖`
+      );
+
+  return bot.sendMessage(chatId, title, {
     parse_mode: "Markdown",
-    reply_markup: picker.reply_markup,
+    reply_markup: { inline_keyboard: rows },
   });
+}
+
+async function askBorrower(chatId, item) {
+  return sendGroupSelector(chatId, item);
 }
 
 // Commits the borrow after the user confirms on the review step. Centralised so the
@@ -2000,6 +2048,53 @@ bot.on("callback_query", async (query) => {
         const isBorrow = action === "borm_pg";
         const prefix = isBorrow ? "borm_pick" : "retm_pick";
         return sendEquipmentPicker(chatId, prefix, page, isBorrow);
+      }
+
+      case "borgrp": {
+        const targetGroup = rest[0];
+        if (targetGroup === "all") {
+          const picker = await sendOfficerPicker(chatId, "boroffpg", 0, null);
+          return bot.sendMessage(chatId, picker.title, {
+            parse_mode: "Markdown",
+            reply_markup: picker.reply_markup,
+          });
+        }
+        if (targetGroup === "main") {
+          return sendGroupSelector(chatId, null);
+        }
+
+        const officers = await officerService.loadOfficers();
+        const filtered = officers.filter((o) => o.group === targetGroup);
+        if (filtered.length === 0) {
+          return bot.sendMessage(
+            chatId,
+            tr(chatId, `No officers found in Group ${targetGroup}.`, `មិនមានទិន្នន័យមន្ត្រីក្នុងក្រុមទី ${targetGroup} ទេ។`)
+          );
+        }
+
+        const rows = filtered.map((off) => [
+          {
+            text: `[ក្រុមទី ${off.group}] 👤 ${off.name}`,
+            callback_data: `bor_select_idx:${off.index}`,
+          },
+        ]);
+        rows.push([
+          {
+            text: tr(chatId, "⬅️ Back to Group Selection", "⬅️ ជ្រើសរើសក្រុមផ្សេង"),
+            callback_data: "borgrp:main",
+          },
+        ]);
+        rows.push([{ text: t(chatId, "cancel"), callback_data: "borm_cancel" }]);
+
+        return bot.sendMessage(
+          chatId,
+          tr(
+            chatId,
+            `Officers in *Group ${targetGroup}* (${filtered.length}):\nTap a name to select borrower:`,
+            `បញ្ជីមន្ត្រីក្នុង *ក្រុមទី ${targetGroup}* (${filtered.length} នាក់)៖\nសូមចុចលើឈ្មោះដើម្បីជ្រើសរើសអ្នកខ្ចី៖`
+          ),
+          { parse_mode: "Markdown", reply_markup: { inline_keyboard: rows } }
+        );
       }
 
       case "borm_add": {
