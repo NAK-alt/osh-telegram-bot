@@ -216,14 +216,11 @@ async function createEquipment({ nameKhmer, nameEnglish, name, model, quantity, 
 }
 
 const EDITABLE_FIELDS = {
+  name_km: "equipmentNameKhmer",
+  name_en: "equipmentNameEnglish",
   name: "equipmentName",
-  brand: "brand",
   model: "model",
-  serial: "serialNumber",
-  location: "storageLocation",
   quantity: "totalQuantity",
-  minstock: "minimumStockLevel",
-  description: "description",
 };
 
 async function editField(equipmentCode, field, value) {
@@ -239,15 +236,21 @@ async function editField(equipmentCode, field, value) {
     const newTotal = Number(value);
     const diff = newTotal - item.totalQuantity;
     updates.totalQuantity = newTotal;
-    updates.availableQuantity = item.availableQuantity + diff;
+    updates.availableQuantity = Math.max(0, item.availableQuantity + diff);
     updates.status = computeStatus(updates.availableQuantity, item.minimumStockLevel);
-  } else if (dbField === "minimumStockLevel") {
-    updates.minimumStockLevel = Number(value);
-    updates.status = computeStatus(item.availableQuantity, updates.minimumStockLevel);
   } else {
     updates[dbField] = value;
-    if (dbField === "equipmentName") {
-      updates.equipmentNameKey = normalizeLookup(value);
+    if (dbField === "equipmentNameKhmer" || dbField === "equipmentNameEnglish" || dbField === "equipmentName") {
+      const nameKhmer = dbField === "equipmentNameKhmer" ? value : (item.equipmentNameKhmer || "");
+      const nameEnglish = dbField === "equipmentNameEnglish" ? value : (item.equipmentNameEnglish || "");
+      let displayName = item.equipmentName;
+      if (nameKhmer && nameEnglish) {
+        displayName = `${nameKhmer} (${nameEnglish})`;
+      } else if (nameKhmer || nameEnglish) {
+        displayName = nameKhmer || nameEnglish;
+      }
+      updates.equipmentName = displayName;
+      updates.equipmentNameKey = normalizeLookup(`${displayName} ${nameKhmer} ${nameEnglish}`);
     }
   }
 

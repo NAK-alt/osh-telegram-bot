@@ -241,29 +241,24 @@ function escHtml(value) {
 }
 
 function formatItem(item) {
-  const name = escHtml(item.equipmentName);
-  // "Added via Telegram bot" is an internal default, not a real note — never show it.
-  const note =
-    item.description && item.description !== "Added via Telegram bot"
-      ? escHtml(item.description)
-      : "";
+  const nameKhmer = item.equipmentNameKhmer || "";
+  const nameEnglish = item.equipmentNameEnglish || "";
+  let nameDisplay = escHtml(item.equipmentName || "Equipment");
+  if (nameKhmer && nameEnglish) {
+    nameDisplay = `${escHtml(nameKhmer)} (${escHtml(nameEnglish)})`;
+  }
+
   return {
     en:
-      `<b>${name}</b>\n` +
+      `<b>${nameDisplay}</b>\n` +
+      (item.model ? `Model: ${escHtml(item.model)}\n` : "") +
       `Available: ${item.availableQuantity} / ${item.totalQuantity}  |  Borrowed: ${item.borrowedQuantity}\n` +
-      `Min Stock: ${item.minimumStockLevel}\n` +
-      `Status: ${item.status}\n` +
-      (item.lastBorrowedBy ? `Last Borrowed By: ${escHtml(item.lastBorrowedBy)}\n` : "") +
-      (item.storageLocation ? `Location: ${escHtml(item.storageLocation)}\n` : "") +
-      (note ? `Notes: ${note}` : ""),
+      `Status: ${item.status}`,
     km:
-      `<b>${name}</b>\n` +
-      `មានសល់: ${item.availableQuantity} / ${item.totalQuantity}  |  ខ្ចីចេញ: ${item.borrowedQuantity}\n` +
-      `ចំនួនអប្បបរមា: ${item.minimumStockLevel}\n` +
-      `ស្ថានភាព: ${item.status}\n` +
-      (item.lastBorrowedBy ? `អ្នកខ្ចីចុងក្រោយ: ${escHtml(item.lastBorrowedBy)}\n` : "") +
-      (item.storageLocation ? `ទីតាំង: ${escHtml(item.storageLocation)}\n` : "") +
-      (note ? `កំណត់សម្គាល់: ${note}` : ""),
+      `<b>${nameDisplay}</b>\n` +
+      (item.model ? `ម៉ូឌែល៖ ${escHtml(item.model)}\n` : "") +
+      `សល់ក្នុងស្តុក៖ ${item.availableQuantity} / ${item.totalQuantity}  |  ខ្ចីចេញ៖ ${item.borrowedQuantity}\n` +
+      `ស្ថានភាព៖ ${item.status}`,
   };
 }
 
@@ -1502,14 +1497,10 @@ async function runBorrow(chatId) {
 }
 
 const EDIT_FIELDS = [
-  { key: "name", labelEn: "Name", labelKm: "ឈ្មោះ" },
-  { key: "brand", labelEn: "Brand", labelKm: "ម៉ាក" },
-  { key: "model", labelEn: "Model", labelKm: "ម៉ូដែល" },
-  { key: "serial", labelEn: "Serial", labelKm: "Serial" },
-  { key: "location", labelEn: "Location", labelKm: "ទីតាំង" },
-  { key: "quantity", labelEn: "Quantity", labelKm: "ចំនួន" },
-  { key: "minstock", labelEn: "Min stock", labelKm: "ចំនួនអប្បបរមា" },
-  { key: "description", labelEn: "Notes", labelKm: "កំណត់សម្គាល់" },
+  { key: "name_km", labelEn: "Khmer Name", labelKm: "ឈ្មោះ (ភាសាខ្មែរ)" },
+  { key: "name_en", labelEn: "English Name", labelKm: "ឈ្មោះ (ភាសាអង់គ្លេស)" },
+  { key: "model", labelEn: "Model", labelKm: "ម៉ូឌែល / ជំនាន់" },
+  { key: "quantity", labelEn: "Total Quantity", labelKm: "បរិមាណសរុប (ស្តុក)" },
 ];
 
 function editFieldKeyboard(chatId, item) {
