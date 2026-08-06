@@ -167,13 +167,28 @@ async function searchEquipment(query, limit = 8) {
   return scored.slice(0, limit).map((s) => s.item);
 }
 
-async function createEquipment({ name, quantity, imagePath }) {
+async function createEquipment({ nameKhmer, nameEnglish, name, model, quantity, imagePath }) {
   const total = Number(quantity) || 0;
+  const nameKhmerClean = String(nameKhmer || "").trim();
+  const nameEnglishClean = String(nameEnglish || "").trim();
+  const rawName = String(name || "").trim();
+
+  let displayName = rawName;
+  if (!displayName) {
+    if (nameKhmerClean && nameEnglishClean) {
+      displayName = `${nameKhmerClean} (${nameEnglishClean})`;
+    } else {
+      displayName = nameKhmerClean || nameEnglishClean || "Equipment";
+    }
+  }
+
   const docRef = await db.collection(COLLECTION).add({
-    equipmentName: name,
-    equipmentNameKey: normalizeLookup(name),
+    equipmentName: displayName,
+    equipmentNameKhmer: nameKhmerClean || (rawName ? rawName : ""),
+    equipmentNameEnglish: nameEnglishClean,
+    equipmentNameKey: normalizeLookup(`${displayName} ${nameKhmerClean} ${nameEnglishClean}`),
     brand: "",
-    model: "",
+    model: String(model || "").trim(),
     serialNumber: "",
     storageLocation: "",
     totalQuantity: total,

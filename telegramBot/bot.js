@@ -1346,14 +1346,42 @@ bot.onText(/^\/skip(?:@\w+)?$/i, async (msg) => {
 
   const chatId = msg.chat.id;
   const session = getSession(chatId);
-  if (!session || session.flow !== "add" || session.step !== "photo") return;
+  if (!session || session.flow !== "add") return;
 
-  try {
-    await finishAddFlow(chatId, session, null);
-  } catch (err) {
-    console.error("[TelegramBot] /skip error:", err);
-    clearSession(chatId);
-    bot.sendMessage(chatId, tr(chatId, `Something went wrong: ${err.message}. Flow cancelled, try /add again.`, `មានបញ្ហាមួយ៖ ${err.message}។ បានបោះបង់ flow ហើយ សូមសាកល្បង /add ម្ដងទៀត។`));
+  if (session.step === "nameEnglish") {
+    session.step = "model";
+    setSession(chatId, session);
+    return bot.sendMessage(
+      chatId,
+      tr(
+        chatId,
+        "Please enter the Model number/name (or type /skip to skip):",
+        "សូមបញ្ចូលម៉ូឌែល/ជំនាន់ (Model) [ឬវាយ /skip ដើម្បីរំលង]៖"
+      )
+    );
+  }
+
+  if (session.step === "model") {
+    session.step = "quantity";
+    setSession(chatId, session);
+    return bot.sendMessage(
+      chatId,
+      tr(
+        chatId,
+        "Please enter the total quantity (number):",
+        "សូមបញ្ចូលចំនួនសរុបនៃឧបករណ៍ (ជាលេខ)៖"
+      )
+    );
+  }
+
+  if (session.step === "photo") {
+    try {
+      await finishAddFlow(chatId, session, null);
+    } catch (err) {
+      console.error("[TelegramBot] /skip error:", err);
+      clearSession(chatId);
+      bot.sendMessage(chatId, tr(chatId, `Something went wrong: ${err.message}. Flow cancelled, try /add again.`, `មានបញ្ហាមួយ៖ ${err.message}។ បានបោះបង់ flow ហើយ សូមសាកល្បង /add ម្ដងទៀត។`));
+    }
   }
 });
 
@@ -2512,22 +2540,75 @@ bot.on("message", async (msg) => {
 
     // ---- add flow ----
     if (session.flow === "add") {
-      if (session.step === "name") {
-        session.data.name = msg.text.trim();
+      if (session.step === "name" || session.step === "nameKhmer") {
+        session.data.nameKhmer = msg.text.trim();
+        session.step = "nameEnglish";
+        setSession(chatId, session);
+        return bot.sendMessage(
+          chatId,
+          tr(
+            chatId,
+            "Please enter the Equipment Name in English (or type /skip to skip):",
+            "សូមបញ្ចូលឈ្មោះឧបករណ៍ជាភាសាអង់គ្លេស (English Name) [ឬវាយ /skip ដើម្បីរំលង]៖"
+          )
+        );
+      }
+
+      if (session.step === "nameEnglish") {
+        if (msg.text && !msg.text.startsWith("/skip")) {
+          session.data.nameEnglish = msg.text.trim();
+        }
+        session.step = "model";
+        setSession(chatId, session);
+        return bot.sendMessage(
+          chatId,
+          tr(
+            chatId,
+            "Please enter the Model number/name (or type /skip to skip):",
+            "សូមបញ្ចូលម៉ូឌែល/ជំនាន់ (Model) [ឬវាយ /skip ដើម្បីរំលង]៖"
+          )
+        );
+      }
+
+      if (session.step === "model") {
+        if (msg.text && !msg.text.startsWith("/skip")) {
+          session.data.model = msg.text.trim();
+        }
         session.step = "quantity";
         setSession(chatId, session);
-        return bot.sendMessage(chatId, tr(chatId, "Please enter the total quantity (number):", "សូមបញ្ចូលចំនួនសរុបនៃឧបករណ៍ (ជាលេខ)៖"));
+        return bot.sendMessage(
+          chatId,
+          tr(
+            chatId,
+            "Please enter the total quantity (number):",
+            "សូមបញ្ចូលចំនួនសរុបនៃឧបករណ៍ (ជាលេខ)៖"
+          )
+        );
       }
 
       if (session.step === "quantity") {
         const qty = Number(msg.text.trim());
         if (isNaN(qty) || qty < 0) {
-          return bot.sendMessage(chatId, tr(chatId, "Please enter a valid positive number for total quantity.", "សូមបញ្ចូលចំនួនសរុបដែលត្រឹមត្រូវ (ជាលេខវិជ្ជមាន)៖"));
+          return bot.sendMessage(
+            chatId,
+            tr(
+              chatId,
+              "Please enter a valid positive number for total quantity.",
+              "សូមបញ្ចូលចំនួនសរុបដែលត្រឹមត្រូវ (ជាលេខវិជ្ជមាន)៖"
+            )
+          );
         }
         session.data.quantity = qty;
         session.step = "photo";
         setSession(chatId, session);
-        return bot.sendMessage(chatId, tr(chatId, "Please send an equipment photo, or type /skip to use the default placeholder image:", "សូមផ្ញើរូបភាពឧបករណ៍ ឬវាយ /skip ដើម្បីរំលងការបញ្ចូលរូបភាព៖"));
+        return bot.sendMessage(
+          chatId,
+          tr(
+            chatId,
+            "Please send an equipment photo, or type /skip to use default image:",
+            "សូមផ្ញើរូបភាពឧបករណ៍ ឬវាយ /skip ដើម្បីរំលងការបញ្ចូលរូបភាព៖"
+          )
+        );
       }
 
       if (session.step === "photo") {
