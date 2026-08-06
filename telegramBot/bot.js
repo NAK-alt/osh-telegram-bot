@@ -1337,7 +1337,7 @@ async function sendReport(chatId, type) {
 bot.onText(/^\/add$/, (msg) => {
   if (!isAuthorized(msg)) return reject(msg);
   setSession(msg.chat.id, { flow: "add", step: "name", data: {} });
-  bot.sendMessage(msg.chat.id, tr(msg.chat.id, "Let's add new equipment. What's the equipment name?", "តោះបញ្ចូលឧបករណ៍ថ្មី។ ឈ្មោះឧបករណ៍ជាអ្វី?"));
+  bot.sendMessage(msg.chat.id, tr(msg.chat.id, "Adding new equipment to inventory. Please enter the equipment name:", "សូមបញ្ចូលឈ្មោះឧបករណ៍ថ្មីដែលត្រូវចុះបញ្ជីចូលក្នុងស្តុក៖"));
 });
 
 bot.onText(/^\/skip(?:@\w+)?$/i, async (msg) => {
@@ -1991,7 +1991,7 @@ bot.on("callback_query", async (query) => {
       }
       case "add": {
         setSession(chatId, { flow: "add", step: "name", data: {} });
-        return bot.sendMessage(chatId, tr(chatId, "Let's add new equipment. What's the equipment name?", "តោះបញ្ចូលឧបករណ៍ថ្មី។ ឈ្មោះឧបករណ៍ជាអ្វី?"));
+        return bot.sendMessage(chatId, tr(chatId, "Adding new equipment to inventory. Please enter the equipment name:", "សូមបញ្ចូលឈ្មោះឧបករណ៍ថ្មីដែលត្រូវចុះបញ្ជីចូលក្នុងស្តុក៖"));
       }
 
       case "borm_pg":
@@ -2256,7 +2256,7 @@ bot.on("message", async (msg) => {
   if (text.includes("Add") || text.includes("បញ្ចូល")) {
     clearSession(chatId);
     setSession(chatId, { flow: "add", step: "name", data: {} });
-    return bot.sendMessage(chatId, tr(chatId, "Let's add new equipment. What's the equipment name?", "តោះបញ្ចូលឧបករណ៍ថ្មី។ ឈ្មោះឧបករណ៍ជាអ្វី?"));
+    return bot.sendMessage(chatId, tr(chatId, "Adding new equipment to inventory. Please enter the equipment name:", "សូមបញ្ចូលឈ្មោះឧបករណ៍ថ្មីដែលត្រូវចុះបញ្ជីចូលក្នុងស្តុក៖"));
   }
 
   if (text.includes("Reports") || text.includes("របាយការណ៍")) {
@@ -2420,18 +2420,18 @@ bot.on("message", async (msg) => {
         session.data.name = msg.text.trim();
         session.step = "quantity";
         setSession(chatId, session);
-        return bot.sendMessage(chatId, tr(chatId, "Total quantity? (number)", "ចំនួនសរុប? (លេខ)"));
+        return bot.sendMessage(chatId, tr(chatId, "Please enter the total quantity (number):", "សូមបញ្ចូលចំនួនសរុបនៃឧបករណ៍ (ជាលេខ)៖"));
       }
 
       if (session.step === "quantity") {
         const qty = Number(msg.text.trim());
         if (isNaN(qty) || qty < 0) {
-          return bot.sendMessage(chatId, tr(chatId, "Please send a valid number for quantity.", "សូមផ្ញើចំនួនដែលត្រឹមត្រូវ។"));
+          return bot.sendMessage(chatId, tr(chatId, "Please enter a valid positive number for total quantity.", "សូមបញ្ចូលចំនួនសរុបដែលត្រឹមត្រូវ (ជាលេខវិជ្ជមាន)៖"));
         }
         session.data.quantity = qty;
         session.step = "photo";
         setSession(chatId, session);
-        return bot.sendMessage(chatId, tr(chatId, "Send a photo now, or type /skip to use the placeholder image.", "ផ្ញើរូបភាពឥឡូវនេះ ឬវាយ /skip ដើម្បីប្រើរូបភាពជំនួស។"));
+        return bot.sendMessage(chatId, tr(chatId, "Please send an equipment photo, or type /skip to use the default placeholder image:", "សូមផ្ញើរូបភាពឧបករណ៍ ឬវាយ /skip ដើម្បីរំលងការបញ្ចូលរូបភាព៖"));
       }
 
       if (session.step === "photo") {
