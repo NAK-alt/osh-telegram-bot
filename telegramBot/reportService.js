@@ -195,7 +195,7 @@ async function generateMasterReport() {
     { header: "Borrowed Qty", key: "borrowedQuantity", width: 14 },
     { header: "Status", key: "status", width: 14 },
   ];
-  const invSheet = createSheet(workbook, "Inventory", inventoryHeaders);
+  const invSheet = createSheet(workbook, "ស្តុកឧបករណ៍", inventoryHeaders);
 
   items.forEach((item) => {
     const names = parseEquipmentNames(item);
@@ -232,7 +232,7 @@ async function generateMasterReport() {
     { header: "Borrowed At", key: "borrowedAt", width: 22 },
     { header: "Reported By", key: "reportedBy", width: 22 },
   ];
-  const borrowersSheet = createSheet(workbook, "Active Borrowers", openLoansHeaders);
+  const borrowersSheet = createSheet(workbook, "បញ្ជីអ្នកខ្ចីសកម្ម", openLoansHeaders);
 
   const activeLoans = collectActiveLoans(items).sort((a, b) => (toDate(b.borrowedAt)?.getTime() || 0) - (toDate(a.borrowedAt)?.getTime() || 0));
   activeLoans.forEach((loan) => {
@@ -255,7 +255,7 @@ async function generateMasterReport() {
     { header: "Added At", key: "addedAt", width: 22 },
     { header: "Added By", key: "addedBy", width: 22 },
   ];
-  const stockInSheet = createSheet(workbook, "Stock In Log", stockInHeaders);
+  const stockInSheet = createSheet(workbook, "កំណត់ហេតុបន្ថែមស្តុក", stockInHeaders);
   const stockInEvents = items
     .flatMap((item) => {
       const history = Array.isArray(item.stockInHistory) ? item.stockInHistory : [];
@@ -291,7 +291,7 @@ async function generateMasterReport() {
     { header: "At", key: "at", width: 22 },
     { header: "Reported By", key: "reportedBy", width: 22 },
   ];
-  const historySheet = createSheet(workbook, "Transaction History", historyHeaders);
+  const historySheet = createSheet(workbook, "ប្រវត្តិប្រតិបត្តិការ", historyHeaders);
 
   const borrowEvents = collectBorrowEvents(items).map((e) => ({ ...e, type: "Borrow", at: e.borrowedAt }));
   const returnEvents = collectReturnEvents(items).map((e) => ({ ...e, type: "Return", at: e.returnedAt }));
