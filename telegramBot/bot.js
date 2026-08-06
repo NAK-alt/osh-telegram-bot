@@ -1114,7 +1114,7 @@ bot.onText(/^\/borrow(?:@\w+)?(?:\s+(.+))?$/i, async (msg, match) => {
   if (matchedOfficers.length > 0) {
     const rows = matchedOfficers.map((off) => [
       {
-        text: off.group ? `👤 ${off.name} (ក្រុមទី ${off.group})` : `👤 ${off.name}`,
+        text: off.group ? `[ក្រុមទី ${off.group}] 👤 ${off.name}` : `👤 ${off.name}`,
         callback_data: `bor_select_idx:${off.index}`,
       },
     ]);
@@ -1373,7 +1373,7 @@ async function sendOfficerPicker(chatId, prefix = "boroffpg", page = 0, item = n
 
   const rows = slice.map((off) => [
     {
-      text: off.group ? `👤 ${off.name} (ក្រុមទី ${off.group})` : `👤 ${off.name}`,
+      text: off.group ? `[ក្រុមទី ${off.group}] 👤 ${off.name}` : `👤 ${off.name}`,
       callback_data: `bor_select_idx:${off.index}`,
     },
   ]);
@@ -2282,7 +2282,7 @@ bot.on("message", async (msg) => {
         if (matchedOfficers.length > 0) {
           const rows = matchedOfficers.map((off) => [
             {
-              text: off.group ? `👤 ${off.name} (ក្រុមទី ${off.group})` : `👤 ${off.name}`,
+              text: off.group ? `[ក្រុមទី ${off.group}] 👤 ${off.name}` : `👤 ${off.name}`,
               callback_data: `bor_select_idx:${off.index}`,
             },
           ]);
