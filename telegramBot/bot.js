@@ -1,3 +1,4 @@
+process.env.NTBA_FIX_350 = "1";
 require("dotenv").config();
 const TelegramBot = require("node-telegram-bot-api");
 const path = require("path");
@@ -2634,7 +2635,10 @@ bot.on("message", async (msg) => {
   }
 });
 
-bot.on("polling_error", (err) => console.error("[TelegramBot] polling error:", err.message));
+bot.on("polling_error", (err) => {
+  if (err && err.message && err.message.includes("409 Conflict")) return;
+  console.error("[TelegramBot] polling error:", err.message);
+});
 
 // Gracefully stop polling on SIGTERM / SIGINT so Railway rolling restarts don't trigger 409 Conflict errors
 const shutdown = (signal) => {
