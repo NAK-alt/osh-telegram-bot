@@ -55,7 +55,9 @@ async function loadOfficers(forceReload = false) {
       const province = getVal(7);
       const phone = getVal(8);
 
+      const index = officers.length;
       officers.push({
+        index,
         name,
         id,
         role,
@@ -106,15 +108,16 @@ async function searchOfficers(query, limit = 8) {
 }
 
 /**
- * Get all officer names list.
+ * Get officer by numerical index.
  */
-async function getAllOfficerNames() {
+async function getOfficerByIndex(idx) {
   const officers = await loadOfficers();
-  return officers.map((o) => o.name);
+  return officers[idx] || null;
 }
 
 module.exports = {
   loadOfficers,
   searchOfficers,
   getAllOfficerNames,
+  getOfficerByIndex,
 };

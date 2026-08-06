@@ -1074,7 +1074,7 @@ bot.onText(/^\/borrow(?:@\w+)?(?:\s+(.+))?$/i, async (msg, match) => {
     const rows = matchedOfficers.map((off) => [
       {
         text: off.id ? `👤 ${off.name} (${off.id})` : `👤 ${off.name}`,
-        callback_data: `bor_select_name:${encodeURIComponent(off.name)}`,
+        callback_data: `bor_select_idx:${off.index}`,
       },
     ]);
     rows.push([{ text: t(chatId, "cancel"), callback_data: "borm_cancel" }]);
@@ -1316,7 +1316,12 @@ async function askBorrower(chatId, item) {
     const key = name.toLowerCase().trim();
     if (key && !seen.has(key)) {
       seen.add(key);
-      rows.push([{ text: `🕒 ${name}`, callback_data: `bor_select_name:${encodeURIComponent(name)}` }]);
+      const matchOff = officers.find((o) => o.name.toLowerCase().trim() === key);
+      if (matchOff) {
+        rows.push([{ text: `🕒 ${name}`, callback_data: `bor_select_idx:${matchOff.index}` }]);
+      } else {
+        rows.push([{ text: `🕒 ${name}`, callback_data: `bor_select_idx:rec_${encodeURIComponent(name.slice(0, 30))}` }]);
+      }
     }
   }
 
@@ -1328,7 +1333,7 @@ async function askBorrower(chatId, item) {
       seen.add(key);
       officerCount++;
       const label = off.id ? `👤 ${off.name} (${off.id})` : `👤 ${off.name}`;
-      rows.push([{ text: label, callback_data: `bor_select_name:${encodeURIComponent(off.name)}` }]);
+      rows.push([{ text: label, callback_data: `bor_select_idx:${off.index}` }]);
     }
   }
 
@@ -1473,8 +1478,17 @@ bot.on("callback_query", async (query) => {
         return askBorrower(chatId, item);
       }
 
-      case "bor_select_name": {
-        const borrowerName = decodeURIComponent(id || "");
+      case "bor_select_idx": {
+        let borrowerName = "";
+        if ((id || "").startsWith("rec_")) {
+          borrowerName = decodeURIComponent(id.slice(4));
+        } else {
+          const idx = Number(id);
+          const off = await officerService.getOfficerByIndex(idx);
+          if (off) borrowerName = off.name;
+        }
+
+        if (!borrowerName) return bot.sendMessage(chatId, t(chatId, "itemGone"));
         const session = getSession(chatId);
 
         if (session && session.flow === "borrow_multi") {
@@ -1945,13 +1959,13 @@ bot.on("message", async (msg) => {
           const rows = matchedOfficers.map((off) => [
             {
               text: off.id ? `👤 ${off.name} (${off.id})` : `👤 ${off.name}`,
-              callback_data: `bor_select_name:${encodeURIComponent(off.name)}`,
+              callback_data: `bor_select_idx:${off.index}`,
             },
           ]);
           rows.push([
             {
               text: tr(chatId, `Use exact typed name: "${esc(inputName)}"`, `ប្រើឈ្មោះដែលបានវាយ៖ "${esc(inputName)}"`),
-              callback_data: `bor_select_name:${encodeURIComponent(inputName)}`,
+              callback_data: `bor_select_idx:rec_${encodeURIComponent(inputName.slice(0, 30))}`,
             },
           ]);
           rows.push([{ text: t(chatId, "cancel"), callback_data: "borm_cancel" }]);
