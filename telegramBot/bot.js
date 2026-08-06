@@ -1273,66 +1273,44 @@ bot.onText(/^\/delete\s+(.+)$/i, async (msg, match) => {
   });
 });
 
-// ---------- /report — pick a report type from buttons ----------
+// ---------- /report — generate and send the single Master Report ----------
+async function sendReport(chatId) {
+  try {
+    await bot.sendMessage(
+      chatId,
+      tr(
+        chatId,
+        "📊 Generating Master Equipment Report (Excel)...",
+        "📊 កំពុងរៀបចំរបាយការណ៍សរុបប្រព័ន្ធគ្រប់គ្រងឧបករណ៍ OSH (Excel)..."
+      )
+    );
+    const filePath = await generateMasterReport();
+    const dateStr = new Date().toLocaleString();
+    await bot.sendDocument(chatId, filePath, {
+      caption: tr(
+        chatId,
+        `📊 OSH Master Equipment Report — ${dateStr}`,
+        `📊 របាយការណ៍សរុបប្រព័ន្ធគ្រប់គ្រងឧបករណ៍ OSH — ${dateStr}`
+      ),
+    });
+    fs.unlink(filePath, () => {});
+  } catch (err) {
+    console.error("[TelegramBot] /report error:", err);
+    bot.sendMessage(
+      chatId,
+      tr(chatId, `Failed to generate report: ${err.message}`, `បង្កើតរបាយការណ៍មិនបាន៖ ${err.message}`)
+    );
+  }
+}
+
 async function sendReportMenu(chatId) {
-  await bot.sendMessage(chatId, tr(chatId, "Choose a report:", "ជ្រើសរើសរបាយការណ៍៖"), {
-    reply_markup: {
-      inline_keyboard: [
-        [
-          { text: tr(chatId, "Full inventory", "ស្តុកទាំងមូល"), callback_data: "rep:inv" },
-          { text: tr(chatId, "Borrowers", "អ្នកខ្ចី"), callback_data: "rep:bor" },
-        ],
-        [{ text: tr(chatId, "Stock + history", "ស្តុក + ប្រវត្តិ"), callback_data: "rep:stk" }],
-      ],
-    },
-  });
+  return sendReport(chatId);
 }
 
 bot.onText(/^\/report(?:@\w+)?$/i, async (msg) => {
   if (!isAuthorized(msg)) return reject(msg);
-  await sendReportMenu(msg.chat.id);
+  await sendReport(msg.chat.id);
 });
-
-// Keep the typed variants working too.
-bot.onText(/^\/report(?:@\w+)?\s+borrowers$/i, async (msg) => {
-  if (!isAuthorized(msg)) return reject(msg);
-  await sendReport(msg.chat.id, "borrowers");
-});
-
-bot.onText(/^\/report(?:@\w+)?\s+stock$/i, async (msg) => {
-  if (!isAuthorized(msg)) return reject(msg);
-  await sendReport(msg.chat.id, "stock");
-});
-
-async function sendReport(chatId, type) {
-  try {
-    if (type === "borrowers") {
-      await bot.sendMessage(chatId, tr(chatId, "Generating borrower report...", "កំពុងបង្កើតរបាយការណ៍អ្នកខ្ចី..."));
-      const filePath = await generateBorrowerReport();
-      await bot.sendDocument(chatId, filePath, {
-        caption: tr(chatId, `Borrower report — ${new Date().toLocaleString()}`, `របាយការណ៍អ្នកខ្ចី — ${new Date().toLocaleString()}`),
-      });
-      fs.unlink(filePath, () => {});
-    } else if (type === "stock") {
-      await bot.sendMessage(chatId, tr(chatId, "Generating stock history report...", "កំពុងបង្កើតរបាយការណ៍ស្តុក និងប្រវត្តិ..."));
-      const filePath = await generateStockHistoryReport();
-      await bot.sendDocument(chatId, filePath, {
-        caption: tr(chatId, `Stock and history report — ${new Date().toLocaleString()}`, `របាយការណ៍ស្តុក និងប្រវត្តិ — ${new Date().toLocaleString()}`),
-      });
-      fs.unlink(filePath, () => {});
-    } else {
-      await bot.sendMessage(chatId, tr(chatId, "Generating report...", "កំពុងបង្កើតរបាយការណ៍..."));
-      const filePath = await generateInventoryReport();
-      await bot.sendDocument(chatId, filePath, {
-        caption: tr(chatId, `Full inventory report — ${new Date().toLocaleString()}`, `របាយការណ៍ស្តុកទាំងមូល — ${new Date().toLocaleString()}`),
-      });
-      fs.unlink(filePath, () => {});
-    }
-  } catch (err) {
-    console.error("[TelegramBot] /report error:", err);
-    bot.sendMessage(chatId, tr(chatId, `Failed to generate report: ${err.message}`, `បង្កើតរបាយការណ៍មិនបាន៖ ${err.message}`));
-  }
-}
 
 // ---------- /add ----------
 bot.onText(/^\/add$/, (msg) => {
@@ -1829,14 +1807,9 @@ bot.on("callback_query", async (query) => {
         return bot.sendMessage(chatId, t(chatId, "cancelled"));
       }
 
-      case "report": {
-        return sendReportMenu(chatId);
-      }
-
+      case "report":
       case "rep": {
-        // Map the short callback codes to the report types sendReport expects.
-        const repType = { inv: "inventory", bor: "borrowers", stk: "stock" }[rest[0]] || "inventory";
-        return sendReport(chatId, repType);
+        return sendReport(chatId);
       }
       case "edtm_equip": {
         return sendEquipmentPicker(chatId, "edte_pick", 0, false);
