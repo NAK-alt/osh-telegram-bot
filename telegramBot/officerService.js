@@ -115,6 +115,14 @@ async function getOfficerByIndex(idx) {
   return officers[idx] || null;
 }
 
+/**
+ * Get all officer names list.
+ */
+async function getAllOfficerNames() {
+  const officers = await loadOfficers();
+  return officers.map((o) => o.name);
+}
+
 module.exports = {
   loadOfficers,
   searchOfficers,
