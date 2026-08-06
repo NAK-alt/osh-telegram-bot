@@ -1073,7 +1073,7 @@ bot.onText(/^\/borrow(?:@\w+)?(?:\s+(.+))?$/i, async (msg, match) => {
   if (matchedOfficers.length > 0) {
     const rows = matchedOfficers.map((off) => [
       {
-        text: off.id ? `👤 ${off.name} (${off.id})` : `👤 ${off.name}`,
+        text: off.group ? `👤 ${off.name} (ក្រុម ${off.group})` : `👤 ${off.name}`,
         callback_data: `bor_select_idx:${off.index}`,
       },
     ]);
@@ -1332,7 +1332,7 @@ async function askBorrower(chatId, item) {
     if (!seen.has(key)) {
       seen.add(key);
       officerCount++;
-      const label = off.id ? `👤 ${off.name} (${off.id})` : `👤 ${off.name}`;
+      const label = off.group ? `👤 ${off.name} (ក្រុម ${off.group})` : `👤 ${off.name}`;
       rows.push([{ text: label, callback_data: `bor_select_idx:${off.index}` }]);
     }
   }
@@ -1539,11 +1539,40 @@ bot.on("callback_query", async (query) => {
       }
 
       case "boro": {
-        const item = await equipmentService.findById(id);
-        if (!item) return bot.sendMessage(chatId, t(chatId, "itemGone"));
         const reporter = await resolveReporter(query.from);
-        setSession(chatId, { flow: "borrow", step: "borrower", data: { id: item.id, equipmentName: item.equipmentName, reporter } });
-        return bot.sendMessage(chatId, tr(chatId, `Who is borrowing ${item.equipmentName}? (type the name)`, `តើអ្នកណាកំពុងខ្ចី ${item.equipmentName}? (វាយឈ្មោះ)`));
+        if (id === "multi" || !id) {
+          setSession(chatId, { flow: "borrow_multi", step: "borrower", data: { borrowerName: "", items: [], reporter } });
+          return bot.sendMessage(
+            chatId,
+            tr(
+              chatId,
+              "Please type the borrower's name, group number, or officer search keyword:",
+              "សូមវាយឈ្មោះអ្នកខ្ចី ឬលេខក្រុម ឬពាក្យគន្លឹះស្វែងរកមន្ត្រី៖"
+            )
+          );
+        }
+        const item = await equipmentService.findById(id);
+        if (!item) {
+          setSession(chatId, { flow: "borrow_multi", step: "borrower", data: { borrowerName: "", items: [], reporter } });
+          return bot.sendMessage(
+            chatId,
+            tr(
+              chatId,
+              "Please type the borrower's name, group number, or officer search keyword:",
+              "សូមវាយឈ្មោះអ្នកខ្ចី ឬលេខក្រុម ឬពាក្យគន្លឹះស្វែងរកមន្ត្រី៖"
+            )
+          );
+        }
+        setSession(chatId, { flow: "borrow_multi", step: "borrower", data: { borrowerName: "", items: [], currentItem: item, reporter } });
+        return bot.sendMessage(
+          chatId,
+          tr(
+            chatId,
+            `Who is borrowing *${esc(item.equipmentName)}*? (type the name or officer search keyword)`,
+            `តើអ្នកណាកំពុងខ្ចី *${esc(item.equipmentName)}*? (វាយឈ្មោះ ឬពាក្យគន្លឹះស្វែងរកមន្ត្រី)`
+          ),
+          { parse_mode: "Markdown" }
+        );
       }
 
       case "borc": {
@@ -1958,7 +1987,7 @@ bot.on("message", async (msg) => {
         if (matchedOfficers.length > 0) {
           const rows = matchedOfficers.map((off) => [
             {
-              text: off.id ? `👤 ${off.name} (${off.id})` : `👤 ${off.name}`,
+              text: off.group ? `👤 ${off.name} (ក្រុម ${off.group})` : `👤 ${off.name}`,
               callback_data: `bor_select_idx:${off.index}`,
             },
           ]);
