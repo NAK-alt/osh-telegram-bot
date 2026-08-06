@@ -69,9 +69,21 @@ async function loadOfficers(forceReload = false) {
       });
     });
 
+    // Sort officers by group number ascending (Group 1, Group 2, Group 3...)
+    officers.sort((a, b) => {
+      const gA = parseInt(a.group, 10) || 9999;
+      const gB = parseInt(b.group, 10) || 9999;
+      if (gA !== gB) return gA - gB;
+      return a.name.localeCompare(b.name, "km");
+    });
+
+    officers.forEach((off, idx) => {
+      off.index = idx;
+    });
+
     cachedOfficers = officers;
     lastLoadedTime = Date.now();
-    console.log(`[officerService] Loaded ${cachedOfficers.length} officers from Excel.`);
+    console.log(`[officerService] Loaded ${cachedOfficers.length} officers from Excel (sorted by Group).`);
     return cachedOfficers;
   } catch (err) {
     console.error("[officerService] Failed to read officer Excel file:", err.message);
