@@ -1230,6 +1230,16 @@ bot.onText(/^\/edit\s+(.+)\s+(name|brand|model|serial|location|quantity|minstock
   sendView(chatId, result.item);
 });
 
+// ---------- /edit ----------
+bot.onText(/^\/edit(?:@\w+)?$/i, (msg) => {
+  if (!isAuthorized(msg)) return reject(msg);
+  const chatId = msg.chat.id;
+  bot.sendMessage(chatId, tr(chatId, "Opening Edit Menu...", "កំពុងបើកម៉ឺនុយកែប្រែ..."), {
+    reply_markup: getMainReplyKeyboard(chatId),
+  });
+  return sendEditMasterMenu(chatId);
+});
+
 // ---------- /delete <name> ----------
 bot.onText(/^\/delete\s+(.+)\s+confirm$/i, async (msg, match) => {
   if (!isAuthorized(msg)) return reject(msg);
