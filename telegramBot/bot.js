@@ -10,6 +10,7 @@ const { getSession, setSession, clearSession } = require("./sessionStore");
 const { getLanguage, setLanguage } = require("./languageStore");
 const equipmentService = require("./equipmentService");
 const {
+  generateMasterReport,
   generateInventoryReport,
   generateBorrowerReport,
   generateStockHistoryReport,
