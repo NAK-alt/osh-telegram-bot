@@ -1306,48 +1306,47 @@ bot.onText(/^\/skip(?:@\w+)?$/i, async (msg) => {
 });
 
 // ---------- Flow prompts (used by button-driven flows) ----------
-async function askBorrower(chatId, item) {
-  const recent = recentBorrowers(item || {});
+async function sendOfficerPicker(chatId, prefix = "boroffpg", page = 0, item = null) {
   const officers = await officerService.loadOfficers();
-  const rows = [];
-  const seen = new Set();
-
-  for (const name of recent) {
-    const key = name.toLowerCase().trim();
-    if (key && !seen.has(key)) {
-      seen.add(key);
-      const matchOff = officers.find((o) => o.name.toLowerCase().trim() === key);
-      if (matchOff) {
-        rows.push([{ text: `🕒 ${name}`, callback_data: `bor_select_idx:${matchOff.index}` }]);
-      } else {
-        rows.push([{ text: `🕒 ${name}`, callback_data: `bor_select_idx:rec_${encodeURIComponent(name.slice(0, 30))}` }]);
-      }
-    }
+  if (officers.length === 0) {
+    return {
+      title: tr(chatId, "No officers found in directory.", "មិនមានទិន្នន័យមន្ត្រីក្នុងបញ្ជីទេ។"),
+      reply_markup: { inline_keyboard: [[{ text: t(chatId, "cancel"), callback_data: "borm_cancel" }]] },
+    };
   }
 
-  let officerCount = 0;
-  for (const off of officers) {
-    if (officerCount >= 6) break;
-    const key = off.name.toLowerCase().trim();
-    if (!seen.has(key)) {
-      seen.add(key);
-      officerCount++;
-      const label = off.group ? `👤 ${off.name} (ក្រុម ${off.group})` : `👤 ${off.name}`;
-      rows.push([{ text: label, callback_data: `bor_select_idx:${off.index}` }]);
-    }
-  }
+  const pageLimit = 6;
+  const totalPages = Math.max(1, Math.ceil(officers.length / pageLimit));
+  const p = Math.min(Math.max(0, page), totalPages - 1);
+  const slice = officers.slice(p * pageLimit, (p + 1) * pageLimit);
 
-  rows.push([{ text: tr(chatId, "🔍 Search / Type officer name", "🔍 ស្វែងរក / វាយឈ្មោះមន្ត្រី"), callback_data: `boro:${item ? item.id : 'multi'}` }]);
+  const rows = slice.map((off) => [
+    {
+      text: off.group ? `👤 ${off.name} (ក្រុម ${off.group})` : `👤 ${off.name}`,
+      callback_data: `bor_select_idx:${off.index}`,
+    },
+  ]);
+
+  const nav = [];
+  if (p > 0) nav.push({ text: t(chatId, "prev"), callback_data: `${prefix}:${p - 1}` });
+  nav.push({ text: `${p + 1}/${totalPages}`, callback_data: "noop" });
+  if (p < totalPages - 1) nav.push({ text: t(chatId, "next"), callback_data: `${prefix}:${p + 1}` });
+  rows.push(nav);
   rows.push([{ text: t(chatId, "cancel"), callback_data: "borm_cancel" }]);
 
   const itemName = item ? esc(item.equipmentName) : "";
   const title = itemName
-    ? tr(chatId, `Who is borrowing *${itemName}*?`, `តើអ្នកណាកំពុងខ្ចី *${itemName}*?`)
-    : tr(chatId, "Who is borrowing equipment?", "តើអ្នកណាកំពុងខ្ចីឧបករណ៍?");
+    ? tr(chatId, `Select borrower for *${itemName}* (${p + 1}/${totalPages}):`, `ជ្រើសរើសអ្នកខ្ចីសម្រាប់ *${itemName}* (ទំព័រ ${p + 1}/${totalPages})៖`)
+    : tr(chatId, `Select borrower (${p + 1}/${totalPages}):`, `ជ្រើសរើសអ្នកខ្ចី (ទំព័រ ${p + 1}/${totalPages})៖`);
 
-  return bot.sendMessage(chatId, title, {
+  return { title, reply_markup: { inline_keyboard: rows } };
+}
+
+async function askBorrower(chatId, item, page = 0) {
+  const picker = await sendOfficerPicker(chatId, "boroffpg", page, item);
+  return bot.sendMessage(chatId, picker.title, {
     parse_mode: "Markdown",
-    reply_markup: { inline_keyboard: rows },
+    reply_markup: picker.reply_markup,
   });
 }
 
@@ -1476,6 +1475,24 @@ bot.on("callback_query", async (query) => {
         const reporter = await resolveReporter(query.from);
         setSession(chatId, { flow: "borrow", step: "borrower", data: { id: item.id, equipmentName: item.equipmentName, reporter } });
         return askBorrower(chatId, item);
+      }
+
+      case "boroffpg": {
+        const page = Number(id) || 0;
+        const session = getSession(chatId);
+        const item = session && session.data ? session.data.currentItem : null;
+        const picker = await sendOfficerPicker(chatId, "boroffpg", page, item);
+        try {
+          await bot.editMessageText(picker.title, {
+            chat_id: chatId,
+            message_id: query.message.message_id,
+            parse_mode: "Markdown",
+            reply_markup: picker.reply_markup,
+          });
+        } catch (_) {
+          await bot.sendMessage(chatId, picker.title, { parse_mode: "Markdown", reply_markup: picker.reply_markup });
+        }
+        return;
       }
 
       case "bor_select_idx": {
