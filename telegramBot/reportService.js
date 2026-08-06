@@ -13,6 +13,7 @@ const HEADERS = [
   { header: "Available Qty", key: "availableQuantity", width: 14 },
   { header: "Borrowed Qty", key: "borrowedQuantity", width: 14 },
   { header: "Last Borrowed By", key: "lastBorrowedBy", width: 20 },
+  { header: "Last Reported By", key: "lastReportedBy", width: 20 },
   { header: "Min Stock Level", key: "minimumStockLevel", width: 15 },
   { header: "Status", key: "status", width: 14 },
   { header: "Description", key: "description", width: 30 },
@@ -47,12 +48,13 @@ function getLatestVisibleBorrowMeta(item) {
     .filter(isVisibleEntry)
     .map((entry) => ({
       borrowerName: entry.borrowerName || "",
+      reportedBy: entry.reportedBy || "",
       borrowedAt: toDate(entry.borrowedAt),
     }))
     .filter((entry) => entry.borrowerName && entry.borrowedAt);
 
   if (entries.length === 0) {
-    return { borrowerName: "", borrowedAt: null };
+    return { borrowerName: "", reportedBy: "", borrowedAt: null };
   }
 
   entries.sort((left, right) => right.borrowedAt - left.borrowedAt);
@@ -109,7 +111,23 @@ function collectBorrowEvents(items) {
         equipmentName: item.equipmentName || "",
         quantity: Number(entry.quantity) || 0,
         borrowedAt: entry.borrowedAt || null,
+        reportedBy: entry.reportedBy || "",
         equipmentStatus: item.status || "",
+      }));
+    })
+    .filter((entry) => entry.borrowerName || entry.equipmentName);
+}
+
+function collectReturnEvents(items) {
+  return items
+    .flatMap((item) => {
+      const history = (Array.isArray(item.returnHistory) ? item.returnHistory : []).filter(isVisibleEntry);
+      return history.map((entry) => ({
+        borrowerName: entry.borrowerName || "",
+        equipmentName: item.equipmentName || "",
+        quantity: Number(entry.quantity) || 0,
+        returnedAt: entry.returnedAt || null,
+        reportedBy: entry.reportedBy || "",
       }));
     })
     .filter((entry) => entry.borrowerName || entry.equipmentName);
@@ -125,6 +143,7 @@ function collectActiveLoans(items) {
         quantity: Number(loan.quantity) || 0,
         remainingQuantity: Number(loan.remainingQuantity ?? loan.quantity) || 0,
         borrowedAt: loan.borrowedAt || null,
+        reportedBy: loan.reportedBy || "",
       }));
     })
     .filter((entry) => entry.borrowerName || entry.equipmentName);
@@ -159,6 +178,7 @@ async function generateInventoryReport() {
       availableQuantity: item.availableQuantity ?? 0,
       borrowedQuantity: item.borrowedQuantity ?? 0,
       lastBorrowedBy: latestVisible.borrowerName,
+      lastReportedBy: latestVisible.reportedBy,
       minimumStockLevel: item.minimumStockLevel ?? 0,
       status: item.status || "",
       description: item.description || "",
@@ -203,7 +223,15 @@ async function generateBorrowerReport() {
     { header: "Equipment Name", key: "equipmentName", width: 28 },
     { header: "Quantity", key: "quantity", width: 12 },
     { header: "Borrowed At", key: "borrowedAt", width: 22 },
+    { header: "Reported By", key: "reportedBy", width: 22 },
     { header: "Equipment Status", key: "equipmentStatus", width: 16 },
+  ]);
+  const returnHistorySheet = createSheet(workbook, "Return History", [
+    { header: "Borrower Name", key: "borrowerName", width: 24 },
+    { header: "Equipment Name", key: "equipmentName", width: 28 },
+    { header: "Quantity", key: "quantity", width: 12 },
+    { header: "Returned At", key: "returnedAt", width: 22 },
+    { header: "Reported By", key: "reportedBy", width: 22 },
   ]);
   const openLoansSheet = createSheet(workbook, "Open Loans", [
     { header: "Borrower Name", key: "borrowerName", width: 24 },
@@ -211,10 +239,16 @@ async function generateBorrowerReport() {
     { header: "Original Qty", key: "quantity", width: 14 },
     { header: "Remaining Qty", key: "remainingQuantity", width: 14 },
     { header: "Borrowed At", key: "borrowedAt", width: 22 },
+    { header: "Reported By", key: "reportedBy", width: 22 },
   ]);
 
   const summaryMap = new Map();
   const activeLoans = collectActiveLoans(items);
+  const returnEvents = collectReturnEvents(items).sort((left, right) => {
+    const leftTime = toDate(left.returnedAt)?.getTime() || 0;
+    const rightTime = toDate(right.returnedAt)?.getTime() || 0;
+    return rightTime - leftTime;
+  });
 
   events.forEach((event) => {
     historySheet.addRow({
@@ -222,6 +256,7 @@ async function generateBorrowerReport() {
       equipmentName: event.equipmentName,
       quantity: event.quantity,
       borrowedAt: formatTimestamp(event.borrowedAt),
+      reportedBy: event.reportedBy,
       equipmentStatus: event.equipmentStatus,
     }).font = { name: "Arial", size: 10 };
 
@@ -242,6 +277,16 @@ async function generateBorrowerReport() {
     summaryMap.set(key, current);
   });
 
+  returnEvents.forEach((event) => {
+    returnHistorySheet.addRow({
+      borrowerName: event.borrowerName,
+      equipmentName: event.equipmentName,
+      quantity: event.quantity,
+      returnedAt: formatTimestamp(event.returnedAt),
+      reportedBy: event.reportedBy,
+    }).font = { name: "Arial", size: 10 };
+  });
+
   activeLoans
     .sort((left, right) => {
       const leftTime = toDate(left.borrowedAt)?.getTime() || 0;
@@ -255,6 +300,7 @@ async function generateBorrowerReport() {
         quantity: loan.quantity,
         remainingQuantity: loan.remainingQuantity,
         borrowedAt: formatTimestamp(loan.borrowedAt),
+        reportedBy: loan.reportedBy,
       }).font = { name: "Arial", size: 10 };
     });
 
@@ -275,8 +321,9 @@ async function generateBorrowerReport() {
     });
 
   styleTableBorders(summarySheet, summarySheet.rowCount, 4);
-  styleTableBorders(historySheet, historySheet.rowCount, 5);
-  styleTableBorders(openLoansSheet, openLoansSheet.rowCount, 5);
+  styleTableBorders(historySheet, historySheet.rowCount, 6);
+  styleTableBorders(returnHistorySheet, returnHistorySheet.rowCount, 5);
+  styleTableBorders(openLoansSheet, openLoansSheet.rowCount, 6);
 
   return writeWorkbookToTemp(workbook, "OSH-Borrower-Report");
 }
@@ -292,19 +339,39 @@ async function generateStockHistoryReport() {
     { header: "Borrowed Qty", key: "borrowedQuantity", width: 14 },
     { header: "Status", key: "status", width: 14 },
     { header: "Last Borrowed By", key: "lastBorrowedBy", width: 20 },
+    { header: "Last Reported By", key: "lastReportedBy", width: 20 },
     { header: "Last Borrowed At", key: "lastBorrowedAt", width: 22 },
   ]);
   const historySheet = createSheet(workbook, "Recent History", [
     { header: "Equipment Name", key: "equipmentName", width: 28 },
     { header: "Borrower Name", key: "borrowerName", width: 24 },
+    { header: "Type", key: "type", width: 12 },
     { header: "Quantity", key: "quantity", width: 12 },
-    { header: "Borrowed At", key: "borrowedAt", width: 22 },
+    { header: "At", key: "at", width: 22 },
+    { header: "Reported By", key: "reportedBy", width: 22 },
   ]);
 
-  const recentEvents = collectBorrowEvents(items)
+  const borrowEvents = collectBorrowEvents(items).map((event) => ({
+    equipmentName: event.equipmentName,
+    borrowerName: event.borrowerName,
+    type: "Borrow",
+    quantity: event.quantity,
+    at: event.borrowedAt,
+    reportedBy: event.reportedBy,
+  }));
+  const returnEvents = collectReturnEvents(items).map((event) => ({
+    equipmentName: event.equipmentName,
+    borrowerName: event.borrowerName,
+    type: "Return",
+    quantity: event.quantity,
+    at: event.returnedAt,
+    reportedBy: event.reportedBy,
+  }));
+  const recentEvents = borrowEvents
+    .concat(returnEvents)
     .sort((left, right) => {
-      const leftTime = toDate(left.borrowedAt)?.getTime() || 0;
-      const rightTime = toDate(right.borrowedAt)?.getTime() || 0;
+      const leftTime = toDate(left.at)?.getTime() || 0;
+      const rightTime = toDate(right.at)?.getTime() || 0;
       return rightTime - leftTime;
     })
     .slice(0, 100);
@@ -318,6 +385,7 @@ async function generateStockHistoryReport() {
       borrowedQuantity: item.borrowedQuantity ?? 0,
       status: item.status || "",
       lastBorrowedBy: latestVisible.borrowerName,
+      lastReportedBy: latestVisible.reportedBy,
       lastBorrowedAt: formatTimestamp(latestVisible.borrowedAt),
     }).font = { name: "Arial", size: 10 };
   });
@@ -326,13 +394,15 @@ async function generateStockHistoryReport() {
     historySheet.addRow({
       equipmentName: event.equipmentName,
       borrowerName: event.borrowerName,
+      type: event.type,
       quantity: event.quantity,
-      borrowedAt: formatTimestamp(event.borrowedAt),
+      at: formatTimestamp(event.at),
+      reportedBy: event.reportedBy,
     }).font = { name: "Arial", size: 10 };
   });
 
   styleTableBorders(stockSheet, stockSheet.rowCount, 8);
-  styleTableBorders(historySheet, historySheet.rowCount, 4);
+  styleTableBorders(historySheet, historySheet.rowCount, 6);
 
   return writeWorkbookToTemp(workbook, "OSH-Stock-History-Report");
 }

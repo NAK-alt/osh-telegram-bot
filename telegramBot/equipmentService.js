@@ -34,6 +34,8 @@ function cloneLoan(loan) {
     quantity: Number(loan.quantity) || 0,
     remainingQuantity: getOpenQuantity(loan),
     borrowedAt: loan.borrowedAt || null,
+    reportedBy: loan.reportedBy || "",
+    reportedById: loan.reportedById || "",
   };
 }
 
@@ -183,6 +185,7 @@ async function createEquipment({ name, quantity, imagePath }) {
     status: computeStatus(total, 0),
     description: "",
     borrowHistory: [],
+    returnHistory: [],
     activeLoans: [],
     lastBorrowedBy: "",
     lastBorrowedAt: null,
@@ -238,7 +241,7 @@ async function editField(equipmentCode, field, value) {
   return { item: { id: item.id, ...updated.data() } };
 }
 
-async function borrow(equipmentName, qty, borrowerName) {
+async function borrow(equipmentName, qty, borrowerName, reporter) {
   const item = await findByName(equipmentName);
   if (!item) return { error: "not_found" };
 
@@ -248,6 +251,10 @@ async function borrow(equipmentName, qty, borrowerName) {
 
   const borrower = String(borrowerName || "").trim();
   if (!borrower) return { error: "bad_borrower" };
+
+  // The Telegram user who actually input this borrow (may differ from the borrower).
+  const reportedBy = String((reporter && reporter.name) || "").trim();
+  const reportedById = String((reporter && reporter.id) || "").trim();
 
   const availableQuantity = item.availableQuantity - amount;
   const borrowedQuantity = item.borrowedQuantity + amount;
@@ -264,6 +271,8 @@ async function borrow(equipmentName, qty, borrowerName) {
       quantity: (Number(existingLoan.quantity) || 0) + amount,
       remainingQuantity: (Number(existingLoan.remainingQuantity ?? existingLoan.quantity) || 0) + amount,
       borrowedAt: existingLoan.borrowedAt || borrowedAt,
+      reportedBy: existingLoan.reportedBy || reportedBy,
+      reportedById: existingLoan.reportedById || reportedById,
     };
   } else {
     activeLoans.push({
@@ -271,6 +280,8 @@ async function borrow(equipmentName, qty, borrowerName) {
       quantity: amount,
       remainingQuantity: amount,
       borrowedAt,
+      reportedBy,
+      reportedById,
     });
   }
 
@@ -285,15 +296,17 @@ async function borrow(equipmentName, qty, borrowerName) {
       borrowerName: borrower,
       quantity: amount,
       borrowedAt,
+      reportedBy,
+      reportedById,
       reportHidden: false,
     }),
     updatedAt: admin.firestore.FieldValue.serverTimestamp(),
   });
 
-  return { item: { ...item, availableQuantity, borrowedQuantity, status, lastBorrowedBy: borrower, lastBorrowedAt: borrowedAt } };
+  return { item: { ...item, availableQuantity, borrowedQuantity, status, lastBorrowedBy: borrower, lastBorrowedAt: borrowedAt }, reportedBy };
 }
 
-async function returnItem(equipmentName, qty, borrowerName = "") {
+async function returnItem(equipmentName, qty, borrowerName = "", reporter) {
   const item = await findByName(equipmentName);
   if (!item) return { error: "not_found" };
 
@@ -324,17 +337,37 @@ async function returnItem(equipmentName, qty, borrowerName = "") {
   const borrowedQuantity = item.borrowedQuantity - amount;
   const status = computeStatus(availableQuantity, item.minimumStockLevel);
 
-  await db.collection(COLLECTION).doc(item.id).update({
+  // Persist a return-history entry per borrower who returned units, tagged with the
+  // Telegram user who input the return. arrayUnion accepts multiple args.
+  const returnedAt = admin.firestore.Timestamp.now();
+  const reportedBy = String((reporter && reporter.name) || "").trim();
+  const reportedById = String((reporter && reporter.id) || "").trim();
+  const update = {
     availableQuantity,
     borrowedQuantity,
     status,
     activeLoans: allocation.activeLoans,
     updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-  });
+  };
+  if (allocation.returnedByBorrower.length > 0) {
+    update.returnHistory = admin.firestore.FieldValue.arrayUnion(
+      ...allocation.returnedByBorrower.map((entry) => ({
+        borrowerName: entry.borrowerName || "",
+        quantity: Number(entry.quantity) || 0,
+        returnedAt,
+        reportedBy,
+        reportedById,
+        reportHidden: false,
+      }))
+    );
+  }
+
+  await db.collection(COLLECTION).doc(item.id).update(update);
 
   return {
     item: { ...item, availableQuantity, borrowedQuantity, status, activeLoans: allocation.activeLoans },
     returnedByBorrower: allocation.returnedByBorrower,
+    reportedBy,
   };
 }
 
@@ -343,11 +376,13 @@ async function renameBorrowerRecord(equipmentName, oldBorrowerName, newBorrowerN
   if (!item) return { error: "not_found" };
 
   const nextBorrowHistory = transformBorrowEntries(item.borrowHistory || [], oldBorrowerName, newBorrowerName, false);
+  const nextReturnHistory = transformBorrowEntries(item.returnHistory || [], oldBorrowerName, newBorrowerName, false);
   const nextActiveLoans = transformBorrowEntries(item.activeLoans || [], oldBorrowerName, newBorrowerName, false);
   const latest = getLatestVisibleBorrowEntry({ borrowHistory: nextBorrowHistory });
 
   await db.collection(COLLECTION).doc(item.id).update({
     borrowHistory: nextBorrowHistory,
+    returnHistory: nextReturnHistory,
     activeLoans: nextActiveLoans,
     lastBorrowedBy: latest.borrowerName,
     lastBorrowedAt: latest.borrowedAt,
@@ -363,11 +398,13 @@ async function hideBorrowerFromReports(equipmentName, borrowerName) {
   if (!item) return { error: "not_found" };
 
   const nextBorrowHistory = transformBorrowEntries(item.borrowHistory || [], borrowerName, borrowerName, true);
+  const nextReturnHistory = transformBorrowEntries(item.returnHistory || [], borrowerName, borrowerName, true);
   const nextActiveLoans = transformBorrowEntries(item.activeLoans || [], borrowerName, borrowerName, true);
   const latest = getLatestVisibleBorrowEntry({ borrowHistory: nextBorrowHistory });
 
   await db.collection(COLLECTION).doc(item.id).update({
     borrowHistory: nextBorrowHistory,
+    returnHistory: nextReturnHistory,
     activeLoans: nextActiveLoans,
     lastBorrowedBy: latest.borrowerName,
     lastBorrowedAt: latest.borrowedAt,
@@ -389,11 +426,13 @@ async function deleteBorrowerRecord(equipmentName, borrowerName) {
   if (!target) return { error: "bad_borrower" };
 
   const history = Array.isArray(item.borrowHistory) ? item.borrowHistory : [];
+  const returnHistory = Array.isArray(item.returnHistory) ? item.returnHistory : [];
   const activeLoans = getActiveLoans(item);
 
   const hasHistory = history.some((entry) => normalizeBorrower(entry.borrowerName) === target);
+  const hasReturnHistory = returnHistory.some((entry) => normalizeBorrower(entry.borrowerName) === target);
   const removedLoans = activeLoans.filter((loan) => normalizeBorrower(loan.borrowerName) === target);
-  if (!hasHistory && removedLoans.length === 0) {
+  if (!hasHistory && !hasReturnHistory && removedLoans.length === 0) {
     return { error: "borrower_not_found" };
   }
 
@@ -404,6 +443,7 @@ async function deleteBorrowerRecord(equipmentName, borrowerName) {
     .filter((loan) => normalizeBorrower(loan.borrowerName) !== target)
     .map(cloneLoan);
   const nextBorrowHistory = history.filter((entry) => normalizeBorrower(entry.borrowerName) !== target);
+  const nextReturnHistory = returnHistory.filter((entry) => normalizeBorrower(entry.borrowerName) !== target);
 
   const availableQuantity = (Number(item.availableQuantity) || 0) + released;
   const borrowedQuantity = Math.max(0, (Number(item.borrowedQuantity) || 0) - released);
@@ -412,6 +452,7 @@ async function deleteBorrowerRecord(equipmentName, borrowerName) {
 
   await db.collection(COLLECTION).doc(item.id).update({
     borrowHistory: nextBorrowHistory,
+    returnHistory: nextReturnHistory,
     activeLoans: nextActiveLoans,
     availableQuantity,
     borrowedQuantity,
@@ -435,6 +476,7 @@ async function clearAllBorrowHistory() {
   for (const item of items) {
     const hasBorrowData =
       (Array.isArray(item.borrowHistory) && item.borrowHistory.length > 0) ||
+      (Array.isArray(item.returnHistory) && item.returnHistory.length > 0) ||
       (Array.isArray(item.activeLoans) && item.activeLoans.length > 0) ||
       (Number(item.borrowedQuantity) || 0) > 0 ||
       item.lastBorrowedBy;
@@ -445,6 +487,7 @@ async function clearAllBorrowHistory() {
     const minimumStockLevel = Number(item.minimumStockLevel) || 0;
     batch.update(db.collection(COLLECTION).doc(item.id), {
       borrowHistory: [],
+      returnHistory: [],
       activeLoans: [],
       borrowedQuantity: 0,
       availableQuantity: totalQuantity,
@@ -484,6 +527,232 @@ async function attachImage(equipmentName, imagePath) {
   return { item: { ...item, imagePath } };
 }
 
+/**
+ * Borrow multiple equipment items at once.
+ * @param {Array<{equipmentName?: string, id?: string, quantity: number}>} items 
+ * @param {string} borrowerName 
+ * @param {object} reporter 
+ */
+async function borrowMultiple(items, borrowerName, reporter) {
+  const borrower = String(borrowerName || "").trim();
+  if (!borrower) return { error: "bad_borrower" };
+  if (!Array.isArray(items) || items.length === 0) return { error: "no_items" };
+
+  // 1. Validate & fetch all items first before mutating any records
+  const resolvedItems = [];
+  const errors = [];
+
+  for (let i = 0; i < items.length; i++) {
+    const entry = items[i];
+    const qty = Number(entry.quantity ?? entry.qty);
+    if (!qty || qty <= 0) {
+      errors.push({ index: i, item: entry.equipmentName || entry.id, error: "bad_quantity" });
+      continue;
+    }
+
+    const item = entry.id
+      ? await findById(entry.id)
+      : await findByName(entry.equipmentName);
+
+    if (!item) {
+      errors.push({ index: i, item: entry.equipmentName || entry.id, error: "not_found" });
+      continue;
+    }
+
+    if (qty > item.availableQuantity) {
+      errors.push({
+        index: i,
+        item: item.equipmentName,
+        error: "insufficient",
+        available: item.availableQuantity,
+        requested: qty,
+      });
+      continue;
+    }
+
+    resolvedItems.push({ item, qty });
+  }
+
+  if (errors.length > 0) {
+    return { error: "validation_failed", errors, processedCount: 0 };
+  }
+
+  // 2. Perform borrow for each resolved item
+  const results = [];
+  for (const { item, qty } of resolvedItems) {
+    const res = await borrow(item.equipmentName, qty, borrower, reporter);
+    results.push(res);
+  }
+
+  return { success: true, results, borrowerName: borrower };
+}
+
+/**
+ * Return multiple equipment items at once.
+ * @param {Array<{equipmentName?: string, id?: string, quantity: number}>} items 
+ * @param {string} borrowerName 
+ * @param {object} reporter 
+ */
+async function returnMultiple(items, borrowerName = "", reporter) {
+  if (!Array.isArray(items) || items.length === 0) return { error: "no_items" };
+
+  // 1. Validate & fetch all items first
+  const resolvedItems = [];
+  const errors = [];
+
+  for (let i = 0; i < items.length; i++) {
+    const entry = items[i];
+    const qty = Number(entry.quantity ?? entry.qty);
+    if (!qty || qty <= 0) {
+      errors.push({ index: i, item: entry.equipmentName || entry.id, error: "bad_quantity" });
+      continue;
+    }
+
+    const item = entry.id
+      ? await findById(entry.id)
+      : await findByName(entry.equipmentName);
+
+    if (!item) {
+      errors.push({ index: i, item: entry.equipmentName || entry.id, error: "not_found" });
+      continue;
+    }
+
+    if (qty > item.borrowedQuantity) {
+      errors.push({
+        index: i,
+        item: item.equipmentName,
+        error: "too_many",
+        borrowed: item.borrowedQuantity,
+        requested: qty,
+      });
+      continue;
+    }
+
+    const borrowerFilter = normalizeBorrower(borrowerName);
+    if (borrowerFilter) {
+      const activeLoans = getActiveLoans(item);
+      const openLoans = activeLoans.filter((loan) => getOpenQuantity(loan) > 0);
+      const borrowerOpen = openLoans.filter((loan) => normalizeBorrower(loan.borrowerName) === borrowerFilter);
+      const borrowerTotal = borrowerOpen.reduce((sum, loan) => sum + getOpenQuantity(loan), 0);
+
+      if (borrowerOpen.length === 0) {
+        errors.push({ index: i, item: item.equipmentName, error: "borrower_not_found", borrowerName });
+        continue;
+      }
+      if (qty > borrowerTotal) {
+        errors.push({
+          index: i,
+          item: item.equipmentName,
+          error: "too_many_borrower",
+          borrowed: borrowerTotal,
+          requested: qty,
+        });
+        continue;
+      }
+    }
+
+    resolvedItems.push({ item, qty });
+  }
+
+  if (errors.length > 0) {
+    return { error: "validation_failed", errors, processedCount: 0 };
+  }
+
+  // 2. Perform return for each resolved item
+  const results = [];
+  for (const { item, qty } of resolvedItems) {
+    const res = await returnItem(item.equipmentName, qty, borrowerName, reporter);
+    results.push(res);
+  }
+
+  return { success: true, results, borrowerName };
+}
+
+/**
+ * Find all active loans across all equipment for a given borrower name.
+ * @param {string} borrowerName 
+ */
+async function getActiveLoansByBorrower(borrowerName) {
+  const target = normalizeBorrower(borrowerName);
+  if (!target) return [];
+
+  const allItems = await getAll();
+  const borrowerLoans = [];
+
+  for (const item of allItems) {
+    const activeLoans = getActiveLoans(item);
+    for (const loan of activeLoans) {
+      const openQty = getOpenQuantity(loan);
+      if (normalizeBorrower(loan.borrowerName) === target && openQty > 0) {
+        borrowerLoans.push({
+          equipmentId: item.id,
+          equipmentName: item.equipmentName,
+          borrowerName: loan.borrowerName,
+          openQuantity: openQty,
+          totalBorrowed: loan.quantity,
+          borrowedAt: loan.borrowedAt,
+        });
+      }
+    }
+  }
+
+  return borrowerLoans;
+}
+
+/**
+ * Get all active borrowers across all equipment.
+ */
+async function getAllActiveBorrowers() {
+  const allItems = await getAll();
+  const borrowerMap = new Map();
+
+  for (const item of allItems) {
+    const activeLoans = getActiveLoans(item);
+    for (const loan of activeLoans) {
+      const openQty = getOpenQuantity(loan);
+      if (openQty > 0) {
+        const key = normalizeBorrower(loan.borrowerName);
+        const existing = borrowerMap.get(key) || {
+          borrowerName: loan.borrowerName || "Unknown",
+          totalQuantity: 0,
+          itemCount: 0,
+          items: [],
+        };
+        existing.totalQuantity += openQty;
+        existing.itemCount += 1;
+        existing.items.push({
+          equipmentId: item.id,
+          equipmentName: item.equipmentName,
+          quantity: openQty,
+        });
+        borrowerMap.set(key, existing);
+      }
+    }
+  }
+
+  return Array.from(borrowerMap.values());
+}
+
+/**
+ * Return ALL items borrowed by a given borrower.
+ * @param {string} borrowerName 
+ * @param {object} reporter 
+ */
+async function returnAllByBorrower(borrowerName, reporter) {
+  const loans = await getActiveLoansByBorrower(borrowerName);
+  if (loans.length === 0) {
+    return { error: "no_loans_found", borrowerName };
+  }
+
+  const itemsToReturn = loans.map((loan) => ({
+    id: loan.equipmentId,
+    equipmentName: loan.equipmentName,
+    qty: loan.openQuantity,
+  }));
+
+  return returnMultiple(itemsToReturn, borrowerName, reporter);
+}
+
 module.exports = {
   findByName,
   findById,
@@ -492,7 +761,12 @@ module.exports = {
   createEquipment,
   editField,
   borrow,
+  borrowMultiple,
   returnItem,
+  returnMultiple,
+  getActiveLoansByBorrower,
+  getAllActiveBorrowers,
+  returnAllByBorrower,
   renameBorrowerRecord,
   hideBorrowerFromReports,
   deleteBorrowerRecord,
@@ -501,3 +775,4 @@ module.exports = {
   attachImage,
   EDITABLE_FIELDS,
 };
+

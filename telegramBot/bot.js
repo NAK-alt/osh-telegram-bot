@@ -14,6 +14,7 @@ const {
   generateStockHistoryReport,
 } = require("./reportService");
 const authStore = require("./authStore");
+const officerService = require("./officerService");
 
 const TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 
@@ -48,8 +49,8 @@ const COMMANDS_EN = [
   { command: "view", description: "View one item + photo — /view <name>" },
   { command: "add", description: "Add new equipment (step by step)" },
   { command: "edit", description: "Edit a field — /edit <name> <field> <value>" },
-  { command: "borrow", description: "Borrow units — /borrow <name>" },
-  { command: "return", description: "Return units — /return <name> <qty> [borrower]" },
+  { command: "borrow", description: "Borrow equipment — /borrow [name] or /borrow (multi)" },
+  { command: "return", description: "Return equipment — /return [name] or /return all <borrower>" },
   { command: "delete", description: "Delete an item — /delete <name>" },
   { command: "report", description: "Download a report (pick a type)" },
   { command: "borrower", description: "Fix borrower in reports — rename | hide | delete" },
@@ -68,8 +69,8 @@ const COMMANDS_KM = [
   { command: "view", description: "មើលឧបករណ៍មួយ + រូបភាព — /view <ឈ្មោះ>" },
   { command: "add", description: "បញ្ចូលឧបករណ៍ថ្មី (ជាជំហានៗ)" },
   { command: "edit", description: "កែ field — /edit <ឈ្មោះ> <field> <តម្លៃ>" },
-  { command: "borrow", description: "ខ្ចីឧបករណ៍ — /borrow <ឈ្មោះ>" },
-  { command: "return", description: "ប្រគល់ឧបករណ៍ — /return <ឈ្មោះ> <ចំនួន> [អ្នកខ្ចី]" },
+  { command: "borrow", description: "ខ្ចីឧបករណ៍ — /borrow (មួយ ឬច្រើនមុខ)" },
+  { command: "return", description: "ប្រគល់ឧបករណ៍ — /return (មួយ, ច្រើន, ឬទាំងអស់)" },
   { command: "delete", description: "លុបឧបករណ៍ — /delete <ឈ្មោះ>" },
   { command: "report", description: "ទាញយករបាយការណ៍ (ជ្រើសប្រភេទ)" },
   { command: "borrower", description: "កែអ្នកខ្ចីក្នុងរបាយការណ៍ — rename | hide | delete" },
@@ -199,6 +200,26 @@ function reject(msg) {
       `${TEXT.km.unauthorized}\nTelegram ID របស់អ្នកគឺ ${id}។ សូមឲ្យ admin រត់៖ /adduser ${id}`
     )
   );
+}
+
+// Resolve the Telegram user who actually input a transaction to a friendly name +
+// id, so we can record "who logged this" alongside the borrower. Name precedence:
+// stored botUsers name → Telegram first/last name → @username → numeric id.
+async function resolveReporter(from) {
+  const id = String((from && from.id) || "");
+  let name = "";
+  if (from) {
+    name = `${from.first_name || ""}${from.last_name ? " " + from.last_name : ""}`.trim();
+    if (!name && from.username) name = `@${from.username}`;
+  }
+  try {
+    const stored = await authStore.getUserName(id);
+    if (stored) name = stored;
+  } catch (err) {
+    console.error("[TelegramBot] resolveReporter getUserName failed:", err.message);
+  }
+  if (!name) name = id;
+  return { id, name };
 }
 
 // Escape Markdown special chars in user-provided values so names with *, _, etc.
@@ -423,7 +444,7 @@ async function finishAddFlow(chatId, session, imagePath) {
 }
 
 // Shared return-result rendering (used by both /return command and the button flow).
-function sendReturnResult(chatId, result, qty, equipmentName, borrowerName) {
+function sendReturnResult(chatId, result, qty, equipmentName, borrowerName, reporterName) {
   if (result.error === "not_found") return bot.sendMessage(chatId, tr(chatId, `No equipment found with name ${equipmentName}.`, `រកមិនឃើញឧបករណ៍ឈ្មោះ ${equipmentName} ទេ។`));
   if (result.error === "bad_quantity") return bot.sendMessage(chatId, tr(chatId, "Quantity must be a positive number.", "ចំនួនត្រូវតែជាលេខវិជ្ជមាន។"));
   if (result.error === "borrower_not_found") {
@@ -441,12 +462,36 @@ function sendReturnResult(chatId, result, qty, equipmentName, borrowerName) {
       ? `\n${tr(chatId, "Returned from", "បានប្រគល់ពី")}: ` +
         result.returnedByBorrower.map((entry) => `${esc(entry.borrowerName)} (${entry.quantity})`).join(", ")
       : "";
+  const inputBy = reporterName
+    ? `\n${tr(chatId, "Input by", "បានបញ្ចូលដោយ")}: ${esc(reporterName)}`
+    : "";
 
   return bot.sendMessage(
     chatId,
-    `${tr(chatId, "Returned", "បានប្រគល់")} ${qty}x ${esc(result.item.equipmentName)}.${borrowerSummary}`,
+    `${tr(chatId, "Returned", "បានប្រគល់")} ${qty}x ${esc(result.item.equipmentName)}.${borrowerSummary}${inputBy}`,
     { parse_mode: "Markdown" }
   );
+}
+
+function getMainReplyKeyboard(chatId) {
+  const isKm = lang(chatId) === "km";
+  return {
+    keyboard: [
+      [
+        { text: isKm ? "📥 ខ្ចីឧបករណ៍ (Borrow)" : "📥 Borrow Equipment" },
+        { text: isKm ? "📤 ប្រគល់ឧបករណ៍ (Return)" : "📤 Return Equipment" },
+      ],
+      [
+        { text: isKm ? "📦 ស្តុកឧបករណ៍ (Stock)" : "📦 View Stock" },
+        { text: isKm ? "➕ បញ្ចូលឧបករណ៍ (Add)" : "➕ Add Equipment" },
+      ],
+      [
+        { text: isKm ? "📊 របាយការណ៍ (Reports)" : "📊 Reports" },
+        { text: isKm ? "❓ ជំនួយ (Help)" : "❓ Help" },
+      ],
+    ],
+    resize_keyboard: true,
+  };
 }
 
 // ---------- /start & /help ----------
@@ -454,19 +499,7 @@ bot.onText(/\/start/, (msg) => {
   if (!isAuthorized(msg)) return reject(msg);
   const chatId = msg.chat.id;
   bot.sendMessage(chatId, t(chatId, "ready"), {
-    reply_markup: {
-      inline_keyboard: [
-        [
-          { text: tr(chatId, "Stock", "ស្តុក"), callback_data: "stkpg:0" },
-          { text: tr(chatId, "Add", "បញ្ចូល"), callback_data: "add" },
-        ],
-        [
-          { text: tr(chatId, "Reports", "របាយការណ៍"), callback_data: "report" },
-          { text: t(chatId, "helpBtn"), callback_data: "help" },
-        ],
-        [{ text: t(chatId, "langToggle"), callback_data: "langtgl" }],
-      ],
-    },
+    reply_markup: getMainReplyKeyboard(chatId),
   });
 });
 
@@ -497,8 +530,13 @@ function sendHelp(chatId) {
         "/add — step-by-step add new equipment",
         "/edit <name> <field> <value> — edit a field",
         "   fields: name, brand, model, serial, location, quantity, minstock, description",
-        "/borrow <name> — borrow units and capture borrower name",
-        "/return <name> <qty> [borrower] — return units, optionally for a specific borrower",
+        "/borrow — start guided borrow flow (single or multiple items)",
+        "   or /borrow <name>",
+        "   or batch: /borrow <borrower> | <item1> <qty1> | <item2> <qty2>",
+        "/return — start guided return flow (pick items or borrower)",
+        "   or /return all <borrower> (return ALL items for borrower)",
+        "   or /return <name> <qty> [borrower]",
+        "   or batch: /return <borrower> | <item1> <qty1> | <item2> <qty2>",
         "/delete <name> — delete an item (asks for confirmation)",
         "/report — download a report (Inventory / Borrowers / Stock)",
         "/borrower rename <equipment> | <old> | <new> — fix a borrower name in reports",
@@ -520,8 +558,13 @@ function sendHelp(chatId) {
         "/add — បញ្ចូលឧបករណ៍ថ្មីជាជំហានៗ",
         "/edit <name> <field> <value> — កែប្រែ field មួយ",
         "   fields: name, brand, model, serial, location, quantity, minstock, description",
-        "/borrow <name> — ខ្ចីឧបករណ៍ និងកត់ឈ្មោះអ្នកខ្ចី",
-        "/return <name> <qty> [borrower] — ប្រគល់ឧបករណ៍",
+        "/borrow — ចាប់ផ្ដើមខ្ចីឧបករណ៍ (មួយ ឬច្រើនមុខ)",
+        "   ឬ /borrow <ឈ្មោះ>",
+        "   ឬ batch: /borrow <អ្នកខ្ចី> | <ឧបករណ៍១> <ចំនួន១> | <ឧបករណ៍២> <ចំនួន២>",
+        "/return — ចាប់ផ្ដើមប្រគល់ឧបករណ៍ (ជ្រើសឧបករណ៍ ឬអ្នកខ្ចី)",
+        "   ឬ /return all <អ្នកខ្ចី> (ប្រគល់ឧបករណ៍ទាំងអស់របស់អ្នកខ្ចី)",
+        "   ឬ /return <ឈ្មោះ> <ចំនួន> [អ្នកខ្ចី]",
+        "   ឬ batch: /return <អ្នកខ្ចី> | <ឧបករណ៍១> <ចំនួន១> | <ឧបករណ៍២> <ចំនួន២>",
         "/delete <name> — លុបឧបករណ៍ (សូមបញ្ជាក់)",
         "/report — ទាញយករបាយការណ៍ (ស្តុក / អ្នកខ្ចី / ប្រវត្តិ)",
         "/borrower rename <ឧបករណ៍> | <ឈ្មោះចាស់> | <ឈ្មោះថ្មី> — កែឈ្មោះអ្នកខ្ចីក្នុងរបាយការណ៍",
@@ -766,58 +809,367 @@ bot.onText(/^\/view\s+(.+)$/i, async (msg, match) => {
   }
 });
 
-// ---------- /borrow <name> — starts a guided flow ----------
-bot.onText(/^\/borrow\s+(.+)$/i, async (msg, match) => {
+// ---------- Batch input parsers & multi-item helpers ----------
+function parseBatchBorrowInput(rawText) {
+  const text = String(rawText || "").trim();
+  if (!text) return null;
+
+  if (text.includes("|")) {
+    const parts = text.split("|").map((p) => p.trim()).filter(Boolean);
+    if (parts.length >= 2) {
+      const borrowerName = parts[0];
+      const items = [];
+      for (let i = 1; i < parts.length; i++) {
+        const itemPart = parts[i];
+        const match = itemPart.match(/^(.+?)[,\s:]+(\d+)$/);
+        if (match) {
+          items.push({ equipmentName: match[1].trim(), qty: Number(match[2]) });
+        }
+      }
+      if (items.length > 0) {
+        return { borrowerName, items };
+      }
+    }
+  }
+
+  if (text.includes(":")) {
+    const [borrowerPart, itemsPart] = text.split(":").map((p) => p.trim());
+    if (borrowerPart && itemsPart) {
+      const itemEntries = itemsPart.split(",").map((p) => p.trim()).filter(Boolean);
+      const items = [];
+      for (const entry of itemEntries) {
+        const match = entry.match(/^(.+?)[,\s:]+(\d+)$/);
+        if (match) {
+          items.push({ equipmentName: match[1].trim(), qty: Number(match[2]) });
+        }
+      }
+      if (items.length > 0) {
+        return { borrowerName: borrowerPart, items };
+      }
+    }
+  }
+
+  return null;
+}
+
+function parseBatchReturnInput(rawText) {
+  const text = String(rawText || "").trim();
+  if (!text) return null;
+
+  if (text.includes("|")) {
+    const parts = text.split("|").map((p) => p.trim()).filter(Boolean);
+    if (parts.length >= 2) {
+      const borrowerName = parts[0];
+      const items = [];
+      for (let i = 1; i < parts.length; i++) {
+        const itemPart = parts[i];
+        const match = itemPart.match(/^(.+?)[,\s:]+(\d+)$/);
+        if (match) {
+          items.push({ equipmentName: match[1].trim(), qty: Number(match[2]) });
+        }
+      }
+      if (items.length > 0) {
+        return { borrowerName, items };
+      }
+    }
+  }
+
+  return null;
+}
+
+function renderBorrowCart(chatId, sessionData) {
+  const { borrowerName, items = [], reporter } = sessionData;
+  const itemsText = items
+    .map((it, idx) => `${idx + 1}. *${esc(it.equipmentName)}* — ${it.qty}x`)
+    .join("\n");
+  const inputByLine = reporter && reporter.name
+    ? `\n${tr(chatId, "Input by", "បានបញ្ចូលដោយ")}: ${esc(reporter.name)}`
+    : "";
+
+  const text = tr(
+    chatId,
+    `📋 *Borrow Cart for ${esc(borrowerName)}:*\n${itemsText || tr(chatId, "(No items added yet)", "(មិនទាន់មានឧបករណ៍)")}${inputByLine}\n\nWhat would you like to do next?`,
+    `📋 *បញ្ជីខ្ចីសម្រាប់ ${esc(borrowerName)}៖*\n${itemsText || tr(chatId, "(មិនទាន់មានឧបករណ៍)", "(មិនទាន់មានឧបករណ៍)")}${inputByLine}\n\nតើអ្នកចង់ធ្វើអ្វីបន្ទាប់?`
+  );
+
+  const rows = [];
+  rows.push([{ text: tr(chatId, "➕ Add another item", "➕ បន្ថែមឧបករណ៍មួយទៀត"), callback_data: "borm_add" }]);
+  if (items.length > 0) {
+    rows.push([{ text: tr(chatId, "✅ Finish & Confirm Borrow", "✅ បញ្ចប់ និងខ្ចី"), callback_data: "borm_fin" }]);
+  }
+  rows.push([{ text: t(chatId, "cancel"), callback_data: "borm_cancel" }]);
+
+  return { text, reply_markup: { inline_keyboard: rows } };
+}
+
+function renderReturnCart(chatId, sessionData) {
+  const { borrowerName, items = [], reporter } = sessionData;
+  const borrowerTitle = borrowerName ? esc(borrowerName) : tr(chatId, "Any borrower", "អ្នកខ្ចីណាក៏បាន");
+  const itemsText = items
+    .map((it, idx) => `${idx + 1}. *${esc(it.equipmentName)}* — ${it.qty}x`)
+    .join("\n");
+  const inputByLine = reporter && reporter.name
+    ? `\n${tr(chatId, "Input by", "បានបញ្ចូលដោយ")}: ${esc(reporter.name)}`
+    : "";
+
+  const text = tr(
+    chatId,
+    `📋 *Return Cart (${borrowerTitle}):*\n${itemsText || tr(chatId, "(No items added yet)", "(មិនទាន់មានឧបករណ៍)")}${inputByLine}\n\nWhat would you like to do next?`,
+    `📋 *បញ្ជីប្រគល់ (${borrowerTitle})៖*\n${itemsText || tr(chatId, "(មិនទាន់មានឧបករណ៍)", "(មិនទាន់មានឧបករណ៍)")}${inputByLine}\n\nតើអ្នកចង់ធ្វើអ្វីបន្ទាប់?`
+  );
+
+  const rows = [];
+  rows.push([{ text: tr(chatId, "➕ Add another item", "➕ បន្ថែមឧបករណ៍មួយទៀត"), callback_data: "retm_add" }]);
+  if (items.length > 0) {
+    rows.push([{ text: tr(chatId, "✅ Finish & Confirm Return", "✅ បញ្ចប់ និងប្រគល់"), callback_data: "retm_fin" }]);
+  }
+  rows.push([{ text: t(chatId, "cancel"), callback_data: "retm_cancel" }]);
+
+  return { text, reply_markup: { inline_keyboard: rows } };
+}
+
+function sendMultiBorrowResult(chatId, result, reporterName) {
+  if (result.error === "bad_borrower") {
+    return bot.sendMessage(chatId, tr(chatId, "Borrower name is required.", "ត្រូវបញ្ចូលឈ្មោះអ្នកខ្ចី។"));
+  }
+  if (result.error === "validation_failed") {
+    const errorLines = result.errors.map((e) => {
+      if (e.error === "not_found") return `• ${e.item}: ${tr(chatId, "Item not found", "រកមិនឃើញឧបករណ៍")}`;
+      if (e.error === "insufficient") return `• ${e.item}: ${tr(chatId, `Only ${e.available} available (requested ${e.requested})`, `មានសល់តែ ${e.available} (ស្នើ ${e.requested})`)}`;
+      if (e.error === "bad_quantity") return `• ${e.item}: ${tr(chatId, "Invalid quantity", "ចំនួនមិនត្រឹមត្រូវ")}`;
+      return `• ${e.item}: ${e.error}`;
+    });
+    return bot.sendMessage(
+      chatId,
+      `⚠️ *${tr(chatId, "Could not process borrow:", "មិនអាចដំណើរការការខ្ចី៖")}*\n${errorLines.join("\n")}`,
+      { parse_mode: "Markdown" }
+    );
+  }
+
+  const borrower = esc(result.borrowerName);
+  const itemsText = result.results
+    .map((res) => `• *${esc(res.item.equipmentName)}* (${res.item.borrowedQuantity} total borrowed)`)
+    .join("\n");
+  const inputByLine = reporterName
+    ? `\n${tr(chatId, "Input by", "បានបញ្ចូលដោយ")}: ${esc(reporterName)}`
+    : "";
+
+  return bot.sendMessage(
+    chatId,
+    `✅ *${tr(chatId, `Successfully borrowed for ${borrower}:`, `បានខ្ចីជោគជ័យសម្រាប់ ${borrower}៖`)}*\n${itemsText}${inputByLine}`,
+    { parse_mode: "Markdown" }
+  );
+}
+
+function sendMultiReturnResult(chatId, result, reporterName) {
+  if (result.error === "no_loans_found") {
+    return bot.sendMessage(chatId, tr(chatId, `No active loans found for ${result.borrowerName}.`, `រកមិនឃើញការខ្ចីសកម្មសម្រាប់ ${result.borrowerName} ទេ។`));
+  }
+  if (result.error === "validation_failed") {
+    const errorLines = result.errors.map((e) => {
+      if (e.error === "not_found") return `• ${e.item}: ${tr(chatId, "Item not found", "រកមិនឃើញឧបករណ៍")}`;
+      if (e.error === "borrower_not_found") return `• ${e.item}: ${tr(chatId, `No active loan for ${e.borrowerName}`, `មិនមានការខ្ចីសកម្មសម្រាប់ ${e.borrowerName}`)}`;
+      if (e.error === "too_many_borrower") return `• ${e.item}: ${tr(chatId, `Only ${e.borrowed} outstanding for ${e.borrowerName}`, `មាននៅសល់តែ ${e.borrowed} សម្រាប់ ${e.borrowerName}`)}`;
+      if (e.error === "too_many") return `• ${e.item}: ${tr(chatId, `Only ${e.borrowed} total borrowed`, `សរុបមានខ្ចីតែ ${e.borrowed}`)}`;
+      return `• ${e.item}: ${e.error}`;
+    });
+    return bot.sendMessage(
+      chatId,
+      `⚠️ *${tr(chatId, "Could not process return:", "មិនអាចដំណើរការការប្រគល់៖")}*\n${errorLines.join("\n")}`,
+      { parse_mode: "Markdown" }
+    );
+  }
+
+  const borrowerText = result.borrowerName ? ` ${tr(chatId, "from", "ពី")} *${esc(result.borrowerName)}*` : "";
+  const itemsText = result.results
+    .map((res) => `• *${esc(res.item.equipmentName)}*`)
+    .join("\n");
+  const inputByLine = reporterName
+    ? `\n${tr(chatId, "Input by", "បានបញ្ចូលដោយ")}: ${esc(reporterName)}`
+    : "";
+
+  return bot.sendMessage(
+    chatId,
+    `✅ *${tr(chatId, "Successfully returned items", "បានប្រគល់ឧបករណ៍ជោគជ័យ")}${borrowerText}:*\n${itemsText}${inputByLine}`,
+    { parse_mode: "Markdown" }
+  );
+}
+
+async function sendEquipmentPicker(chatId, prefix, page = 0, filterActiveOnly = false) {
+  let items = await equipmentService.getAll();
+  if (filterActiveOnly) {
+    items = items.filter((it) => it.availableQuantity > 0);
+  }
+
+  if (items.length === 0) {
+    return bot.sendMessage(chatId, tr(chatId, "No equipment available.", "មិនមានឧបករណ៍ដែលសល់ទេ។"));
+  }
+
+  const pageLimit = 8;
+  const totalPages = Math.max(1, Math.ceil(items.length / pageLimit));
+  const p = Math.min(Math.max(0, page), totalPages - 1);
+  const slice = items.slice(p * pageLimit, (p + 1) * pageLimit);
+
+  const rows = slice.map((it) => [
+    {
+      text: `${it.equipmentName} (${it.availableQuantity}/${it.totalQuantity})`,
+      callback_data: `${prefix}:${it.id}`,
+    },
+  ]);
+
+  const nav = [];
+  if (p > 0) nav.push({ text: t(chatId, "prev"), callback_data: `${prefix}_pg:${p - 1}` });
+  nav.push({ text: `${p + 1}/${totalPages}`, callback_data: "noop" });
+  if (p < totalPages - 1) nav.push({ text: t(chatId, "next"), callback_data: `${prefix}_pg:${p + 1}` });
+  rows.push(nav);
+  rows.push([{ text: t(chatId, "cancel"), callback_data: `${prefix}_cancel` }]);
+
+  return bot.sendMessage(
+    chatId,
+    tr(chatId, "Select an equipment item:", "ជ្រើសរើសឧបករណ៍៖"),
+    { reply_markup: { inline_keyboard: rows } }
+  );
+}
+
+// ---------- /borrow command (supports single, batch, or multi-guided) ----------
+bot.onText(/^\/borrow(?:@\w+)?(?:\s+(.+))?$/i, async (msg, match) => {
   if (!isAuthorized(msg)) return reject(msg);
   const chatId = msg.chat.id;
-  const equipmentName = match[1].trim();
-  const item = await equipmentService.findByName(equipmentName);
-  if (!item) return suggestOrWarn(chatId, equipmentName, "bor");
+  const rawArg = match[1] ? match[1].trim() : "";
+  const reporter = await resolveReporter(msg.from);
 
-  setSession(chatId, { flow: "borrow", step: "borrower", data: { id: item.id, equipmentName: item.equipmentName } });
-  return askBorrower(chatId, item);
+  // 1. Direct batch command: /borrow John | Helmet 2 | Glove 5
+  if (rawArg) {
+    const batch = parseBatchBorrowInput(rawArg);
+    if (batch) {
+      const result = await equipmentService.borrowMultiple(batch.items, batch.borrowerName, reporter);
+      return sendMultiBorrowResult(chatId, result, reporter.name);
+    }
+  }
+
+  // 2. No argument: Start multi-borrow guided flow
+  if (!rawArg) {
+    setSession(chatId, {
+      flow: "borrow_multi",
+      step: "borrower",
+      data: { borrowerName: "", items: [], reporter },
+    });
+    return askBorrower(chatId, null);
+  }
+
+  // 3. Single item argument: /borrow <name>
+  const item = await equipmentService.findByName(rawArg);
+  if (item) {
+    setSession(chatId, {
+      flow: "borrow_multi",
+      step: "borrower",
+      data: { borrowerName: "", items: [], currentItem: item, reporter },
+    });
+    return askBorrower(chatId, item);
+  }
+
+  // 4. Officer search argument: /borrow <officer_name_or_id>
+  const matchedOfficers = await officerService.searchOfficers(rawArg);
+  if (matchedOfficers.length > 0) {
+    const rows = matchedOfficers.map((off) => [
+      {
+        text: off.id ? `👤 ${off.name} (${off.id})` : `👤 ${off.name}`,
+        callback_data: `bor_select_name:${encodeURIComponent(off.name)}`,
+      },
+    ]);
+    rows.push([{ text: t(chatId, "cancel"), callback_data: "borm_cancel" }]);
+    return bot.sendMessage(
+      chatId,
+      tr(
+        chatId,
+        `Matching officer(s) for "${esc(rawArg)}":\nTap a name to select borrower:`,
+        `មន្ត្រីដែលត្រូវគ្នានឹង "${esc(rawArg)}"៖\nចុចលើឈ្មោះដើម្បីជ្រើសរើសអ្នកខ្ចី៖`
+      ),
+      { parse_mode: "Markdown", reply_markup: { inline_keyboard: rows } }
+    );
+  }
+
+  return suggestOrWarn(chatId, rawArg, "bor");
 });
 
-// ---------- /return <name> <qty> ----------
-bot.onText(/^\/return(?:@\w+)?\s+(.+)$/i, async (msg, match) => {
+// ---------- /return command (supports single, all, batch, or multi-guided) ----------
+bot.onText(/^\/return(?:@\w+)?(?:\s+(.+))?$/i, async (msg, match) => {
   if (!isAuthorized(msg)) return reject(msg);
   const chatId = msg.chat.id;
-  const rawArgs = match[1].trim();
-  const parts = rawArgs.split(/\s+/).filter(Boolean);
+  const rawArg = match[1] ? match[1].trim() : "";
+  const reporter = await resolveReporter(msg.from);
 
-  if (parts.length < 2) {
-    return bot.sendMessage(chatId, tr(chatId, "Use: /return <equipment name> <qty> [borrower]", "ប្រើ៖ /return <ឈ្មោះឧបករណ៍> <ចំនួន> [អ្នកខ្ចី]"));
+  // 1. Return all for borrower: /return all John
+  if (/^all\s+(.+)$/i.test(rawArg)) {
+    const borrowerName = rawArg.replace(/^all\s+/i, "").trim();
+    const result = await equipmentService.returnAllByBorrower(borrowerName, reporter);
+    return sendMultiReturnResult(chatId, result, reporter.name);
   }
 
-  let parsed = null;
-
-  for (let prefixLength = parts.length - 1; prefixLength >= 1; prefixLength--) {
-    const equipmentName = parts.slice(0, prefixLength).join(" ").trim();
-    const qty = parts[prefixLength];
-    if (!/^\d+$/.test(qty)) continue;
-
-    const item = await equipmentService.findByName(equipmentName);
-    if (item) {
-      parsed = {
-        equipmentName,
-        qty,
-        borrowerName: parts.slice(prefixLength + 1).join(" ").trim(),
-      };
-      break;
+  // 2. Batch return command: /return John | Helmet 2 | Glove 5
+  if (rawArg) {
+    const batch = parseBatchReturnInput(rawArg);
+    if (batch) {
+      const result = await equipmentService.returnMultiple(batch.items, batch.borrowerName, reporter);
+      return sendMultiReturnResult(chatId, result, reporter.name);
     }
   }
 
-  if (!parsed) {
-    const exactItem = await equipmentService.findByName(rawArgs);
-    if (exactItem) {
-      return bot.sendMessage(chatId, tr(chatId, `How many units of ${exactItem.equipmentName} are being returned? Use /return ${exactItem.equipmentName} <qty> [borrower]`, `ប្រគល់ ${exactItem.equipmentName} ប៉ុន្មាន? ប្រើ /return ${exactItem.equipmentName} <qty> [borrower]`));
+  // 3. Single item return command: /return <name> <qty> [borrower]
+  if (rawArg) {
+    const parts = rawArg.split(/\s+/).filter(Boolean);
+    if (parts.length >= 2) {
+      let parsed = null;
+      for (let prefixLength = parts.length - 1; prefixLength >= 1; prefixLength--) {
+        const equipmentName = parts.slice(0, prefixLength).join(" ").trim();
+        const qty = parts[prefixLength];
+        if (!/^\d+$/.test(qty)) continue;
+
+        const item = await equipmentService.findByName(equipmentName);
+        if (item) {
+          parsed = {
+            equipmentName,
+            qty,
+            borrowerName: parts.slice(prefixLength + 1).join(" ").trim(),
+          };
+          break;
+        }
+      }
+
+      if (parsed) {
+        const { equipmentName, qty, borrowerName } = parsed;
+        const result = await equipmentService.returnItem(equipmentName, qty, borrowerName, reporter);
+        return sendReturnResult(chatId, result, qty, equipmentName, borrowerName, result.reportedBy);
+      }
     }
-    return suggestOrWarn(chatId, rawArgs, "ret");
   }
 
-  const { equipmentName, qty, borrowerName } = parsed;
-  const result = await equipmentService.returnItem(equipmentName, qty, borrowerName);
-  sendReturnResult(chatId, result, qty, equipmentName, borrowerName);
+  // 4. Guided multi-return flow: /return (no args or single item name without qty)
+  const activeBorrowers = await equipmentService.getAllActiveBorrowers();
+  if (activeBorrowers.length === 0) {
+    return bot.sendMessage(chatId, tr(chatId, "No active loans found across all equipment.", "មិនមានការខ្ចីសកម្មនៅលើឧបករណ៍ទាំងអស់ទេ។"));
+  }
+
+  setSession(chatId, {
+    flow: "return_multi",
+    step: "select_borrower",
+    data: { borrowerName: "", items: [], reporter },
+  });
+
+  const rows = activeBorrowers.map((b) => [
+    {
+      text: `👤 ${b.borrowerName} (${b.itemCount} items, ${b.totalQuantity} units)`,
+      callback_data: `retm_borrower:${encodeURIComponent(b.borrowerName)}`,
+    },
+  ]);
+  rows.push([{ text: tr(chatId, "📦 Return items by picking equipment", "📦 ប្រគល់ដោយជ្រើសរើសឧបករណ៍"), callback_data: "retm_any_borrower" }]);
+  rows.push([{ text: t(chatId, "cancel"), callback_data: "retm_cancel" }]);
+
+  return bot.sendMessage(
+    chatId,
+    tr(chatId, "Who is returning equipment?", "តើអ្នកណាប្រគល់ឧបករណ៍?"),
+    { reply_markup: { inline_keyboard: rows } }
+  );
 });
 
 // ---------- /edit <name> <field> <value...> ----------
@@ -954,16 +1306,42 @@ bot.onText(/^\/skip(?:@\w+)?$/i, async (msg) => {
 });
 
 // ---------- Flow prompts (used by button-driven flows) ----------
-function askBorrower(chatId, item) {
-  const suggestions = recentBorrowers(item);
-  if (suggestions.length === 0) {
-    return bot.sendMessage(chatId, tr(chatId, `Who is borrowing ${item.equipmentName}?`, `តើអ្នកណាកំពុងខ្ចី ${item.equipmentName}?`));
+async function askBorrower(chatId, item) {
+  const recent = recentBorrowers(item || {});
+  const officers = await officerService.loadOfficers();
+  const rows = [];
+  const seen = new Set();
+
+  for (const name of recent) {
+    const key = name.toLowerCase().trim();
+    if (key && !seen.has(key)) {
+      seen.add(key);
+      rows.push([{ text: `🕒 ${name}`, callback_data: `bor_select_name:${encodeURIComponent(name)}` }]);
+    }
   }
-  const rows = suggestions.slice(0, 6).map((name, i) => [
-    { text: name, callback_data: `borp:${item.id}:${i}` },
-  ]);
-  rows.push([{ text: t(chatId, "other"), callback_data: `boro:${item.id}` }]);
-  return bot.sendMessage(chatId, tr(chatId, `Who is borrowing ${item.equipmentName}?`, `តើអ្នកណាកំពុងខ្ចី ${item.equipmentName}?`), {
+
+  let officerCount = 0;
+  for (const off of officers) {
+    if (officerCount >= 6) break;
+    const key = off.name.toLowerCase().trim();
+    if (!seen.has(key)) {
+      seen.add(key);
+      officerCount++;
+      const label = off.id ? `👤 ${off.name} (${off.id})` : `👤 ${off.name}`;
+      rows.push([{ text: label, callback_data: `bor_select_name:${encodeURIComponent(off.name)}` }]);
+    }
+  }
+
+  rows.push([{ text: tr(chatId, "🔍 Search / Type officer name", "🔍 ស្វែងរក / វាយឈ្មោះមន្ត្រី"), callback_data: `boro:${item ? item.id : 'multi'}` }]);
+  rows.push([{ text: t(chatId, "cancel"), callback_data: "borm_cancel" }]);
+
+  const itemName = item ? esc(item.equipmentName) : "";
+  const title = itemName
+    ? tr(chatId, `Who is borrowing *${itemName}*?`, `តើអ្នកណាកំពុងខ្ចី *${itemName}*?`)
+    : tr(chatId, "Who is borrowing equipment?", "តើអ្នកណាកំពុងខ្ចីឧបករណ៍?");
+
+  return bot.sendMessage(chatId, title, {
+    parse_mode: "Markdown",
     reply_markup: { inline_keyboard: rows },
   });
 }
@@ -974,8 +1352,8 @@ async function runBorrow(chatId) {
   const session = getSession(chatId);
   if (!session || session.flow !== "borrow") return;
 
-  const { equipmentName, borrowerName, qty } = session.data;
-  const result = await equipmentService.borrow(equipmentName, qty, borrowerName);
+  const { equipmentName, borrowerName, qty, reporter } = session.data;
+  const result = await equipmentService.borrow(equipmentName, qty, borrowerName, reporter);
 
   if (result.error === "not_found") {
     clearSession(chatId);
@@ -1001,9 +1379,12 @@ async function runBorrow(chatId) {
   }
 
   clearSession(chatId);
+  const inputBy = result.reportedBy
+    ? `\n${tr(chatId, "Input by", "បានបញ្ចូលដោយ")}: ${esc(result.reportedBy)}`
+    : "";
   await bot.sendMessage(
     chatId,
-    `${tr(chatId, `Borrowed ${qty}x ${result.item.equipmentName} for ${borrowerName}.`, `បានខ្ចី ${qty}x ${result.item.equipmentName} សម្រាប់ ${borrowerName}។`)}`,
+    `${tr(chatId, `Borrowed ${qty}x ${result.item.equipmentName} for ${borrowerName}.`, `បានខ្ចី ${qty}x ${result.item.equipmentName} សម្រាប់ ${borrowerName}។`)}${inputBy}`,
     { parse_mode: "Markdown" }
   );
   return sendView(chatId, result.item);
@@ -1087,8 +1468,45 @@ bot.on("callback_query", async (query) => {
       case "bor": {
         const item = await equipmentService.findById(id);
         if (!item) return bot.sendMessage(chatId, t(chatId, "itemGone"));
-        setSession(chatId, { flow: "borrow", step: "borrower", data: { id: item.id, equipmentName: item.equipmentName } });
+        const reporter = await resolveReporter(query.from);
+        setSession(chatId, { flow: "borrow", step: "borrower", data: { id: item.id, equipmentName: item.equipmentName, reporter } });
         return askBorrower(chatId, item);
+      }
+
+      case "bor_select_name": {
+        const borrowerName = decodeURIComponent(id || "");
+        const session = getSession(chatId);
+
+        if (session && session.flow === "borrow_multi") {
+          session.data.borrowerName = borrowerName;
+
+          if (session.data.currentItem) {
+            session.step = "item_qty";
+            setSession(chatId, session);
+            const item = session.data.currentItem;
+            return bot.sendMessage(
+              chatId,
+              tr(
+                chatId,
+                `How many units of *${esc(item.equipmentName)}* for *${esc(borrowerName)}*? (Available: ${item.availableQuantity})`,
+                `*${esc(item.equipmentName)}* សម្រាប់ *${esc(borrowerName)}* តើខ្ចីប៉ុន្មានគ្រឿង? (មានសល់៖ ${item.availableQuantity})`
+              ),
+              { parse_mode: "Markdown" }
+            );
+          }
+
+          session.step = "pick_item";
+          setSession(chatId, session);
+          return sendEquipmentPicker(chatId, "borm_pick", 0, true);
+        }
+
+        const reporter = await resolveReporter(query.from);
+        setSession(chatId, {
+          flow: "borrow_multi",
+          step: "pick_item",
+          data: { borrowerName, items: [], reporter },
+        });
+        return sendEquipmentPicker(chatId, "borm_pick", 0, true);
       }
 
       case "borp": {
@@ -1097,10 +1515,11 @@ bot.on("callback_query", async (query) => {
         const idx = Number(rest[1]) || 0;
         const borrower = recentBorrowers(item)[idx];
         if (!borrower) return bot.sendMessage(chatId, t(chatId, "itemGone"));
+        const reporter = await resolveReporter(query.from);
         setSession(chatId, {
           flow: "borrow",
           step: "quantity",
-          data: { id: item.id, equipmentName: item.equipmentName, borrowerName: borrower },
+          data: { id: item.id, equipmentName: item.equipmentName, borrowerName: borrower, reporter },
         });
         return bot.sendMessage(chatId, tr(chatId, `How many units of ${item.equipmentName} are being borrowed?`, `${item.equipmentName} តើខ្ចីប៉ុន្មានគ្រឿង?`));
       }
@@ -1108,7 +1527,8 @@ bot.on("callback_query", async (query) => {
       case "boro": {
         const item = await equipmentService.findById(id);
         if (!item) return bot.sendMessage(chatId, t(chatId, "itemGone"));
-        setSession(chatId, { flow: "borrow", step: "borrower", data: { id: item.id, equipmentName: item.equipmentName } });
+        const reporter = await resolveReporter(query.from);
+        setSession(chatId, { flow: "borrow", step: "borrower", data: { id: item.id, equipmentName: item.equipmentName, reporter } });
         return bot.sendMessage(chatId, tr(chatId, `Who is borrowing ${item.equipmentName}? (type the name)`, `តើអ្នកណាកំពុងខ្ចី ${item.equipmentName}? (វាយឈ្មោះ)`));
       }
 
@@ -1150,10 +1570,11 @@ bot.on("callback_query", async (query) => {
         const loans = (Array.isArray(item.activeLoans) ? item.activeLoans : []).filter((l) => openQuantity(l) > 0);
         const loan = loans[idx];
         if (!loan) return bot.sendMessage(chatId, t(chatId, "itemGone"));
+        const reporter = await resolveReporter(query.from);
         setSession(chatId, {
           flow: "return",
           step: "qty",
-          data: { id: item.id, equipmentName: item.equipmentName, borrowerName: loan.borrowerName, max: openQuantity(loan) },
+          data: { id: item.id, equipmentName: item.equipmentName, borrowerName: loan.borrowerName, max: openQuantity(loan), reporter },
         });
         return bot.sendMessage(chatId, tr(chatId, `How many does ${loan.borrowerName} return? (max ${openQuantity(loan)})`, `${loan.borrowerName} ប្រគល់ប៉ុន្មាន? (អតិបរមា ${openQuantity(loan)})`));
       }
@@ -1161,10 +1582,11 @@ bot.on("callback_query", async (query) => {
       case "reta": {
         const item = await equipmentService.findById(id);
         if (!item) return bot.sendMessage(chatId, t(chatId, "itemGone"));
+        const reporter = await resolveReporter(query.from);
         setSession(chatId, {
           flow: "return",
           step: "qty",
-          data: { id: item.id, equipmentName: item.equipmentName, borrowerName: "", max: item.borrowedQuantity },
+          data: { id: item.id, equipmentName: item.equipmentName, borrowerName: "", max: item.borrowedQuantity, reporter },
         });
         return bot.sendMessage(chatId, tr(chatId, `How many units of ${item.equipmentName} are being returned?`, `${item.equipmentName} តើប្រគល់ប៉ុន្មានគ្រឿង?`));
       }
@@ -1234,6 +1656,195 @@ bot.on("callback_query", async (query) => {
         return bot.sendMessage(chatId, tr(chatId, "Let's add new equipment. What's the equipment name?", "តោះបញ្ចូលឧបករណ៍ថ្មី។ ឈ្មោះឧបករណ៍ជាអ្វី?"));
       }
 
+      case "borm_pg":
+      case "retm_pg": {
+        const page = Number(rest[0]) || 0;
+        const isBorrow = action === "borm_pg";
+        const prefix = isBorrow ? "borm_pick" : "retm_pick";
+        return sendEquipmentPicker(chatId, prefix, page, isBorrow);
+      }
+
+      case "borm_add": {
+        const session = getSession(chatId);
+        if (!session || session.flow !== "borrow_multi") return;
+        session.step = "pick_item";
+        setSession(chatId, session);
+        return sendEquipmentPicker(chatId, "borm_pick", 0, true);
+      }
+
+      case "borm_pick": {
+        const item = await equipmentService.findById(id);
+        if (!item) return bot.sendMessage(chatId, t(chatId, "itemGone"));
+        const session = getSession(chatId) || {
+          flow: "borrow_multi",
+          step: "item_qty",
+          data: { borrowerName: "", items: [], reporter: await resolveReporter(query.from) },
+        };
+        session.flow = "borrow_multi";
+        session.step = "item_qty";
+        session.data.currentItem = item;
+        setSession(chatId, session);
+        return bot.sendMessage(
+          chatId,
+          tr(
+            chatId,
+            `How many units of *${esc(item.equipmentName)}* are being borrowed? (Available: ${item.availableQuantity})`,
+            `*${esc(item.equipmentName)}* តើខ្ចីប៉ុន្មានគ្រឿង? (មានសល់៖ ${item.availableQuantity})`
+          ),
+          { parse_mode: "Markdown" }
+        );
+      }
+
+      case "borm_fin": {
+        const session = getSession(chatId);
+        if (!session || session.flow !== "borrow_multi") return;
+        const { borrowerName, items, reporter } = session.data;
+        if (!borrowerName) {
+          session.step = "borrower";
+          setSession(chatId, session);
+          return bot.sendMessage(chatId, tr(chatId, "Please type or choose borrower name first:", "សូមវាយ ឬជ្រើសរើសឈ្មោះអ្នកខ្ចីជាមុនសិន៖"));
+        }
+        if (!items || items.length === 0) {
+          return bot.sendMessage(chatId, tr(chatId, "Cart is empty. Tap '➕ Add another item' first.", "បញ្ជីទទេស្អាត។ សូមចុច '➕ បន្ថែមឧបករណ៍មួយទៀត' ជាមុនសិន។"));
+        }
+
+        const result = await equipmentService.borrowMultiple(items, borrowerName, reporter);
+        clearSession(chatId);
+        return sendMultiBorrowResult(chatId, result, reporter ? reporter.name : "");
+      }
+
+      case "borm_cancel":
+      case "retm_cancel": {
+        clearSession(chatId);
+        return bot.sendMessage(chatId, t(chatId, "cancelled"));
+      }
+
+      case "retm_borrower": {
+        const borrowerName = decodeURIComponent(id || "");
+        const loans = await equipmentService.getActiveLoansByBorrower(borrowerName);
+        if (loans.length === 0) {
+          return bot.sendMessage(chatId, tr(chatId, `No active loans for ${borrowerName}.`, `មិនមានការខ្ចីសកម្មសម្រាប់ ${borrowerName} ទេ។`));
+        }
+
+        const totalQty = loans.reduce((sum, l) => sum + l.openQuantity, 0);
+        const itemSummary = loans.map((l) => `• ${l.equipmentName}: ${l.openQuantity} units`).join("\n");
+
+        const rows = [
+          [
+            {
+              text: tr(chatId, `🔄 Return ALL (${totalQty} units)`, `🔄 ប្រគល់ទាំងអស់ (${totalQty} គ្រឿង)`),
+              callback_data: `retm_all_confirm:${encodeURIComponent(borrowerName)}`,
+            },
+          ],
+          [
+            {
+              text: tr(chatId, "📋 Pick specific items to return", "📋 ជ្រើសរើសឧបករណ៍ប្រគល់"),
+              callback_data: `retm_select:${encodeURIComponent(borrowerName)}`,
+            },
+          ],
+          [{ text: t(chatId, "cancel"), callback_data: "retm_cancel" }],
+        ];
+
+        return bot.sendMessage(
+          chatId,
+          tr(
+            chatId,
+            `📦 *Active loans for ${esc(borrowerName)}:*\n${itemSummary}\n\nChoose how to return:`,
+            `📦 *ការខ្ចីសកម្មសម្រាប់ ${esc(borrowerName)}៖*\n${itemSummary}\n\nជ្រើសរើសវិធីប្រគល់៖`
+          ),
+          { parse_mode: "Markdown", reply_markup: { inline_keyboard: rows } }
+        );
+      }
+
+      case "retm_all_confirm": {
+        const borrowerName = decodeURIComponent(id || "");
+        const loans = await equipmentService.getActiveLoansByBorrower(borrowerName);
+        const totalQty = loans.reduce((sum, l) => sum + l.openQuantity, 0);
+
+        const rows = [
+          [
+            {
+              text: t(chatId, "confirm"),
+              callback_data: `retm_all_do:${encodeURIComponent(borrowerName)}`,
+            },
+            { text: t(chatId, "cancel"), callback_data: "retm_cancel" },
+          ],
+        ];
+
+        return bot.sendMessage(
+          chatId,
+          tr(
+            chatId,
+            `Are you sure you want to return ALL ${loans.length} item type(s) (${totalQty} units) borrowed by *${esc(borrowerName)}*?`,
+            `តើអ្នកពិតជាចង់ប្រគល់ឧបករណ៍ទាំងអស់ ${loans.length} មុខ (${totalQty} គ្រឿង) របស់ *${esc(borrowerName)}*?`
+          ),
+          { parse_mode: "Markdown", reply_markup: { inline_keyboard: rows } }
+        );
+      }
+
+      case "retm_all_do": {
+        const borrowerName = decodeURIComponent(id || "");
+        const reporter = await resolveReporter(query.from);
+        const result = await equipmentService.returnAllByBorrower(borrowerName, reporter);
+        return sendMultiReturnResult(chatId, result, reporter ? reporter.name : "");
+      }
+
+      case "retm_select":
+      case "retm_any_borrower": {
+        const borrowerName = action === "retm_select" ? decodeURIComponent(id || "") : "";
+        const reporter = await resolveReporter(query.from);
+        setSession(chatId, {
+          flow: "return_multi",
+          step: "pick_item",
+          data: { borrowerName, items: [], reporter },
+        });
+        return sendEquipmentPicker(chatId, "retm_pick", 0, false);
+      }
+
+      case "retm_add": {
+        const session = getSession(chatId);
+        if (!session || session.flow !== "return_multi") return;
+        session.step = "pick_item";
+        setSession(chatId, session);
+        return sendEquipmentPicker(chatId, "retm_pick", 0, false);
+      }
+
+      case "retm_pick": {
+        const item = await equipmentService.findById(id);
+        if (!item) return bot.sendMessage(chatId, t(chatId, "itemGone"));
+        const session = getSession(chatId) || {
+          flow: "return_multi",
+          step: "item_qty",
+          data: { borrowerName: "", items: [], reporter: await resolveReporter(query.from) },
+        };
+        session.flow = "return_multi";
+        session.step = "item_qty";
+        session.data.currentItem = item;
+        setSession(chatId, session);
+        return bot.sendMessage(
+          chatId,
+          tr(
+            chatId,
+            `How many units of *${esc(item.equipmentName)}* are being returned? (Currently borrowed total: ${item.borrowedQuantity})`,
+            `*${esc(item.equipmentName)}* តើប្រគល់ប៉ុន្មានគ្រឿង? (សរុបខ្ចីចេញ៖ ${item.borrowedQuantity})`
+          ),
+          { parse_mode: "Markdown" }
+        );
+      }
+
+      case "retm_fin": {
+        const session = getSession(chatId);
+        if (!session || session.flow !== "return_multi") return;
+        const { borrowerName, items, reporter } = session.data;
+        if (!items || items.length === 0) {
+          return bot.sendMessage(chatId, tr(chatId, "Return cart is empty.", "បញ្ជីប្រគល់ទទេស្អាត។"));
+        }
+
+        const result = await equipmentService.returnMultiple(items, borrowerName || "", reporter);
+        clearSession(chatId);
+        return sendMultiReturnResult(chatId, result, reporter ? reporter.name : "");
+      }
+
       default:
         return;
     }
@@ -1251,56 +1862,182 @@ bot.on("message", async (msg) => {
   if (!isAuthorized(msg)) return;
 
   const chatId = msg.chat.id;
+
+  // Handle Persistent Bottom Reply Keyboard Buttons
+  if (text.includes("Borrow") || text.includes("ខ្ចី")) {
+    clearSession(chatId);
+    const reporter = await resolveReporter(msg.from);
+    setSession(chatId, {
+      flow: "borrow_multi",
+      step: "borrower",
+      data: { borrowerName: "", items: [], reporter },
+    });
+    return askBorrower(chatId, null);
+  }
+
+  if (text.includes("Return") || text.includes("ប្រគល់")) {
+    clearSession(chatId);
+    const reporter = await resolveReporter(msg.from);
+    const activeBorrowers = await equipmentService.getAllActiveBorrowers();
+    if (activeBorrowers.length === 0) {
+      return bot.sendMessage(chatId, tr(chatId, "No active loans found across all equipment.", "មិនមានការខ្ចីសកម្មនៅលើឧបករណ៍ទាំងអស់ទេ។"));
+    }
+    setSession(chatId, {
+      flow: "return_multi",
+      step: "select_borrower",
+      data: { borrowerName: "", items: [], reporter },
+    });
+
+    const rows = activeBorrowers.map((b) => [
+      {
+        text: `👤 ${b.borrowerName} (${b.itemCount} items, ${b.totalQuantity} units)`,
+        callback_data: `retm_borrower:${encodeURIComponent(b.borrowerName)}`,
+      },
+    ]);
+    rows.push([{ text: tr(chatId, "📦 Return items by picking equipment", "📦 ប្រគល់ដោយជ្រើសរើសឧបករណ៍"), callback_data: "retm_any_borrower" }]);
+    rows.push([{ text: t(chatId, "cancel"), callback_data: "retm_cancel" }]);
+
+    return bot.sendMessage(
+      chatId,
+      tr(chatId, "Who is returning equipment?", "តើអ្នកណាប្រគល់ឧបករណ៍?"),
+      { reply_markup: { inline_keyboard: rows } }
+    );
+  }
+
+  if (text.includes("Stock") || text.includes("ស្តុក")) {
+    clearSession(chatId);
+    const items = await equipmentService.getAll();
+    if (items.length === 0) {
+      return bot.sendMessage(chatId, t(chatId, "noEquipment"));
+    }
+    return bot.sendMessage(chatId, `${t(chatId, "pickItem")} (${items.length})`, {
+      reply_markup: stockKeyboard(chatId, items, 0),
+    });
+  }
+
+  if (text.includes("Add") || text.includes("បញ្ចូល")) {
+    clearSession(chatId);
+    setSession(chatId, { flow: "add", step: "name", data: {} });
+    return bot.sendMessage(chatId, tr(chatId, "Let's add new equipment. What's the equipment name?", "តោះបញ្ចូលឧបករណ៍ថ្មី។ ឈ្មោះឧបករណ៍ជាអ្វី?"));
+  }
+
+  if (text.includes("Reports") || text.includes("របាយការណ៍")) {
+    clearSession(chatId);
+    return sendReportMenu(chatId);
+  }
+
+  if (text.includes("Help") || text.includes("ជំនួយ")) {
+    clearSession(chatId);
+    return sendHelp(chatId);
+  }
+
   const session = getSession(chatId);
   if (!session) return;
 
   try {
-    // ---- borrow flow ----
-    if (session.flow === "borrow") {
+    // ---- borrow_multi flow ----
+    if (session.flow === "borrow_multi") {
       if (session.step === "borrower") {
-        session.data.borrowerName = msg.text.trim();
-        session.step = "quantity";
-        setSession(chatId, session);
-        return bot.sendMessage(chatId, tr(chatId, `How many units of ${session.data.equipmentName} are being borrowed?`, `${session.data.equipmentName} តើខ្ចីប៉ុន្មានគ្រឿង?`));
-      }
+        const inputName = msg.text.trim();
+        const matchedOfficers = await officerService.searchOfficers(inputName);
 
-      if (session.step === "quantity") {
-        const qty = Number(msg.text.trim());
-        if (isNaN(qty) || qty <= 0) {
-          return bot.sendMessage(chatId, tr(chatId, "Please send a valid number for quantity.", "សូមផ្ញើចំនួនដែលត្រឹមត្រូវ។"));
+        if (matchedOfficers.length > 0) {
+          const rows = matchedOfficers.map((off) => [
+            {
+              text: off.id ? `👤 ${off.name} (${off.id})` : `👤 ${off.name}`,
+              callback_data: `bor_select_name:${encodeURIComponent(off.name)}`,
+            },
+          ]);
+          rows.push([
+            {
+              text: tr(chatId, `Use exact typed name: "${esc(inputName)}"`, `ប្រើឈ្មោះដែលបានវាយ៖ "${esc(inputName)}"`),
+              callback_data: `bor_select_name:${encodeURIComponent(inputName)}`,
+            },
+          ]);
+          rows.push([{ text: t(chatId, "cancel"), callback_data: "borm_cancel" }]);
+
+          return bot.sendMessage(
+            chatId,
+            tr(
+              chatId,
+              `Matching officer(s) for "${esc(inputName)}":\nTap a name to select borrower:`,
+              `មន្ត្រីដែលត្រូវគ្នានឹង "${esc(inputName)}"៖\nចុចលើឈ្មោះដើម្បីជ្រើសរើសអ្នកខ្ចី៖`
+            ),
+            { parse_mode: "Markdown", reply_markup: { inline_keyboard: rows } }
+          );
         }
 
-        // Stash the quantity and show a review step before committing, so a wrong
-        // borrower name or wrong quantity can be caught before it's recorded.
-        session.data.qty = qty;
-        session.step = "confirm";
-        setSession(chatId, session);
+        session.data.borrowerName = inputName;
 
-        const { equipmentName, borrowerName, id } = session.data;
-        return bot.sendMessage(
-          chatId,
-          tr(
+        // If starting from single item command:
+        if (session.data.currentItem) {
+          session.step = "item_qty";
+          setSession(chatId, session);
+          const item = session.data.currentItem;
+          return bot.sendMessage(
             chatId,
-            `Please confirm:\nBorrow *${qty}× ${esc(equipmentName)}* for *${esc(borrowerName)}*?`,
-            `សូមបញ្ជាក់៖\nខ្ចី *${qty}× ${esc(equipmentName)}* សម្រាប់ *${esc(borrowerName)}*?`
-          ),
-          {
-            parse_mode: "Markdown",
-            reply_markup: {
-              inline_keyboard: [
-                [
-                  { text: t(chatId, "confirm"), callback_data: `borc:${id}` },
-                  { text: t(chatId, "cancel"), callback_data: `borx:${id}` },
-                ],
-              ],
-            },
-          }
-        );
+            tr(
+              chatId,
+              `How many units of *${esc(item.equipmentName)}* for *${esc(session.data.borrowerName)}*? (Available: ${item.availableQuantity})`,
+              `*${esc(item.equipmentName)}* សម្រាប់ *${esc(session.data.borrowerName)}* តើខ្ចីប៉ុន្មានគ្រឿង? (មានសល់៖ ${item.availableQuantity})`
+            ),
+            { parse_mode: "Markdown" }
+          );
+        }
+
+        session.step = "pick_item";
+        setSession(chatId, session);
+        return sendEquipmentPicker(chatId, "borm_pick", 0, true);
       }
 
-      if (session.step === "confirm") {
-        // Ignore typed text — the user must tap Confirm or Cancel.
-        return bot.sendMessage(chatId, tr(chatId, "Tap Confirm or Cancel below.", "សូមចុច បញ្ជាក់ ឬ បោះបង់ ខាងក្រោម។"));
+      if (session.step === "item_qty") {
+        const qty = Number(msg.text.trim());
+        const item = session.data.currentItem;
+        if (!item || Number.isNaN(qty) || qty <= 0) {
+          return bot.sendMessage(chatId, tr(chatId, "Please enter a valid positive number for quantity.", "សូមបញ្ចូលចំនួនវិជ្ជមានដែលត្រឹមត្រូវ។"));
+        }
+        if (qty > item.availableQuantity) {
+          return bot.sendMessage(
+            chatId,
+            tr(chatId, `Only ${item.availableQuantity} available for ${item.equipmentName}. Enter a valid quantity:`, `មានសល់តែ ${item.availableQuantity} សម្រាប់ ${item.equipmentName}។ សូមបញ្ចូលចំនួនដែលត្រឹមត្រូវ៖`)
+          );
+        }
+
+        // Add to items list in session
+        session.data.items = session.data.items || [];
+        session.data.items.push({ id: item.id, equipmentName: item.equipmentName, qty });
+        session.data.currentItem = null;
+        session.step = "cart";
+        setSession(chatId, session);
+
+        const cartUI = renderBorrowCart(chatId, session.data);
+        return bot.sendMessage(chatId, cartUI.text, { parse_mode: "Markdown", reply_markup: cartUI.reply_markup });
+      }
+    }
+
+    // ---- return_multi flow ----
+    if (session.flow === "return_multi") {
+      if (session.step === "item_qty") {
+        const qty = Number(msg.text.trim());
+        const item = session.data.currentItem;
+        if (!item || Number.isNaN(qty) || qty <= 0) {
+          return bot.sendMessage(chatId, tr(chatId, "Please enter a valid positive number for quantity.", "សូមបញ្ចូលចំនួនវិជ្ជមានដែលត្រឹមត្រូវ។"));
+        }
+        if (qty > item.borrowedQuantity) {
+          return bot.sendMessage(
+            chatId,
+            tr(chatId, `Only ${item.borrowedQuantity} total borrowed for ${item.equipmentName}. Enter a valid quantity:`, `សរុបមានខ្ចីតែ ${item.borrowedQuantity} សម្រាប់ ${item.equipmentName}។ សូមបញ្ចូលចំនួនដែលត្រឹមត្រូវ៖`)
+          );
+        }
+
+        session.data.items = session.data.items || [];
+        session.data.items.push({ id: item.id, equipmentName: item.equipmentName, qty });
+        session.data.currentItem = null;
+        session.step = "cart";
+        setSession(chatId, session);
+
+        const cartUI = renderReturnCart(chatId, session.data);
+        return bot.sendMessage(chatId, cartUI.text, { parse_mode: "Markdown", reply_markup: cartUI.reply_markup });
       }
     }
 
@@ -1310,10 +2047,10 @@ bot.on("message", async (msg) => {
       if (isNaN(qty) || qty <= 0) {
         return bot.sendMessage(chatId, tr(chatId, "Please send a valid number for quantity.", "សូមផ្ញើចំនួនដែលត្រឹមត្រូវ។"));
       }
-      const { equipmentName, borrowerName } = session.data;
-      const result = await equipmentService.returnItem(equipmentName, qty, borrowerName || "");
+      const { equipmentName, borrowerName, reporter } = session.data;
+      const result = await equipmentService.returnItem(equipmentName, qty, borrowerName || "", reporter);
       if (!result.error) clearSession(chatId);
-      await sendReturnResult(chatId, result, qty, equipmentName, borrowerName || "");
+      await sendReturnResult(chatId, result, qty, equipmentName, borrowerName || "", result.reportedBy);
       if (!result.error) {
         const fresh = await equipmentService.findByName(equipmentName);
         if (fresh) await sendView(chatId, fresh);

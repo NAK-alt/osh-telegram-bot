@@ -73,6 +73,22 @@ async function listUsers() {
   return snap.docs.map((doc) => ({ id: doc.id, ...(doc.data() || {}) }));
 }
 
+// Resolve the stored display name for one Telegram user id. Returns "" for admins
+// (who aren't in the botUsers collection) or unknown ids — callers fall back to the
+// Telegram first/last name. Used to label "who input this transaction".
+async function getUserName(telegramId) {
+  const id = String(telegramId || "").trim();
+  if (!id) return "";
+  try {
+    const doc = await db.collection(COLLECTION).doc(id).get();
+    if (!doc.exists) return "";
+    return String((doc.data() || {}).name || "");
+  } catch (err) {
+    console.error("[authStore] getUserName failed:", err.message);
+    return "";
+  }
+}
+
 module.exports = {
   ADMIN_IDS,
   load,
@@ -81,4 +97,5 @@ module.exports = {
   addUser,
   removeUser,
   listUsers,
+  getUserName,
 };
