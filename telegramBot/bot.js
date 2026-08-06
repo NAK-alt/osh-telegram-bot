@@ -487,11 +487,52 @@ function getMainReplyKeyboard(chatId) {
       ],
       [
         { text: isKm ? "📊 របាយការណ៍ (Reports)" : "📊 Reports" },
-        { text: isKm ? "❓ ជំនួយ (Help)" : "❓ Help" },
+        { text: isKm ? "✏️ កែប្រែប្រព័ន្ធ (Edit)" : "✏️ Edit System" },
       ],
     ],
     resize_keyboard: true,
   };
+}
+
+function sendEditMasterMenu(chatId) {
+  const isKm = lang(chatId) === "km";
+  const rows = [
+    [
+      {
+        text: isKm ? "📦 កែប្រែ / លុប ឧបករណ៍ (Edit Equipment)" : "📦 Edit / Delete Equipment",
+        callback_data: "edtm_equip",
+      },
+    ],
+    [
+      {
+        text: isKm ? "👤 កែប្រែ / លុប អ្នកខ្ចី (Edit Borrower)" : "👤 Edit / Delete Borrower",
+        callback_data: "edtm_bor",
+      },
+    ],
+    [
+      {
+        text: isKm ? "📝 កែប្រែប្រវត្តិខ្ចី (Edit Loan Entry)" : "📝 Edit Loan Entry",
+        callback_data: "edtm_loan",
+      },
+    ],
+    [
+      {
+        text: isKm ? "➕ បន្ថែមស្តុកឧបករណ៍ (Add Stock + Log)" : "➕ Add Stock + History Log",
+        callback_data: "edtm_stockin",
+      },
+    ],
+    [{ text: t(chatId, "cancel"), callback_data: "borm_cancel" }],
+  ];
+
+  return bot.sendMessage(
+    chatId,
+    tr(
+      chatId,
+      "✏️ *Master Edit Menu*\nWhat would you like to edit or manage?",
+      "✏️ *ម៉ឺនុយកែប្រែប្រព័ន្ធ*\nតើអ្នកចង់កែប្រែ ឬគ្រប់គ្រងផ្នែកណា?"
+    ),
+    { parse_mode: "Markdown", reply_markup: { inline_keyboard: rows } }
+  );
 }
 
 // ---------- /start & /help ----------
@@ -1710,7 +1751,234 @@ bot.on("callback_query", async (query) => {
         const repType = { inv: "inventory", bor: "borrowers", stk: "stock" }[rest[0]] || "inventory";
         return sendReport(chatId, repType);
       }
+      case "edtm_equip": {
+        return sendEquipmentPicker(chatId, "edte_pick", 0, false);
+      }
 
+      case "edte_pick": {
+        const item = await equipmentService.findById(id);
+        if (!item) return bot.sendMessage(chatId, t(chatId, "itemGone"));
+        const rows = [
+          [
+            { text: tr(chatId, "✏️ Edit Item Fields", "✏️ កែប្រែព័ត៌មានឧបករណ៍"), callback_data: `edt:${item.id}` },
+            { text: tr(chatId, "➕ Add Stock (+Qty)", "➕ បន្ថែមស្តុក"), callback_data: `edts_pick:${item.id}` },
+          ],
+          [
+            { text: tr(chatId, "🗑️ Delete Equipment", "🗑️ លុបឧបករណ៍"), callback_data: `del:${item.id}` },
+          ],
+          [{ text: t(chatId, "cancel"), callback_data: "borm_cancel" }],
+        ];
+        return bot.sendMessage(
+          chatId,
+          tr(
+            chatId,
+            `*${esc(item.equipmentName)}*\nTotal: ${item.totalQuantity} | Available: ${item.availableQuantity} | Borrowed: ${item.borrowedQuantity}\nChoose an action:`,
+            `*${esc(item.equipmentName)}*\nសរុប៖ ${item.totalQuantity} | សល់៖ ${item.availableQuantity} | ខ្ចី៖ ${item.borrowedQuantity}\nជ្រើសរើសសកម្មភាព៖`
+          ),
+          { parse_mode: "Markdown", reply_markup: { inline_keyboard: rows } }
+        );
+      }
+
+      case "edtm_bor": {
+        const activeBorrowers = await equipmentService.getAllActiveBorrowers();
+        if (activeBorrowers.length === 0) {
+          return bot.sendMessage(chatId, tr(chatId, "No active borrowers found across equipment.", "មិនមានអ្នកខ្ចីសកម្មនៅលើឧបករណ៍ទាំងអស់ទេ។"));
+        }
+        const rows = activeBorrowers.map((b) => [
+          {
+            text: `👤 ${b.borrowerName} (${b.itemCount} items, ${b.totalQuantity} units)`,
+            callback_data: `edtb_pick:${encodeURIComponent(b.borrowerName)}`,
+          },
+        ]);
+        rows.push([{ text: t(chatId, "cancel"), callback_data: "borm_cancel" }]);
+        return bot.sendMessage(
+          chatId,
+          tr(chatId, "Select a borrower to edit or delete:", "ជ្រើសរើសអ្នកខ្ចីដើម្បីកែប្រែ ឬលុប៖"),
+          { reply_markup: { inline_keyboard: rows } }
+        );
+      }
+
+      case "edtb_pick": {
+        const borrowerName = decodeURIComponent(id || "");
+        const rows = [
+          [
+            { text: tr(chatId, "✏️ Rename Borrower", "✏️ ប្តូរឈ្មោះអ្នកខ្ចី"), callback_data: `edtb_ren:${encodeURIComponent(borrowerName)}` },
+          ],
+          [
+            { text: tr(chatId, "🗑️ Delete Borrower Records", "🗑️ លុបទិន្នន័យអ្នកខ្ចី"), callback_data: `edtb_del:${encodeURIComponent(borrowerName)}` },
+          ],
+          [
+            { text: tr(chatId, "👁️ Hide from Reports", "👁️ លាក់ពីរបាយការណ៍"), callback_data: `edtb_hide:${encodeURIComponent(borrowerName)}` },
+          ],
+          [{ text: t(chatId, "cancel"), callback_data: "borm_cancel" }],
+        ];
+        return bot.sendMessage(
+          chatId,
+          tr(chatId, `Borrower: *${esc(borrowerName)}*\nSelect action:`, `អ្នកខ្ចី៖ *${esc(borrowerName)}*\nជ្រើសរើសសកម្មភាព៖`),
+          { parse_mode: "Markdown", reply_markup: { inline_keyboard: rows } }
+        );
+      }
+
+      case "edtb_ren": {
+        const borrowerName = decodeURIComponent(id || "");
+        setSession(chatId, { flow: "edit_borrower", step: "rename", data: { oldName: borrowerName } });
+        return bot.sendMessage(
+          chatId,
+          tr(
+            chatId,
+            `Type the new name for borrower *${esc(borrowerName)}*:`,
+            `សូមវាយឈ្មោះថ្មីសម្រាប់អ្នកខ្ចី *${esc(borrowerName)}*៖`
+          ),
+          { parse_mode: "Markdown" }
+        );
+      }
+
+      case "edtb_del": {
+        const borrowerName = decodeURIComponent(id || "");
+        const res = await equipmentService.deleteBorrowerGlobal(borrowerName);
+        return bot.sendMessage(
+          chatId,
+          tr(
+            chatId,
+            `Deleted all records for borrower *${esc(borrowerName)}* and restored available stock.`,
+            `បានលុបទិន្នន័យទាំងអស់សម្រាប់អ្នកខ្ចី *${esc(borrowerName)}* និងបានស្ដារស្តុកឡើងវិញ។`
+          ),
+          { parse_mode: "Markdown" }
+        );
+      }
+
+      case "edtb_hide": {
+        const borrowerName = decodeURIComponent(id || "");
+        const items = await equipmentService.getAll();
+        for (const item of items) {
+          await equipmentService.hideBorrowerFromReports(item.equipmentName, borrowerName);
+        }
+        return bot.sendMessage(
+          chatId,
+          tr(
+            chatId,
+            `Borrower *${esc(borrowerName)}* hidden from future reports.`,
+            `បានលាក់អ្នកខ្ចី *${esc(borrowerName)}* ពីរបាយការណ៍រួចរាល់។`
+          ),
+          { parse_mode: "Markdown" }
+        );
+      }
+
+      case "edtm_loan": {
+        const activeBorrowers = await equipmentService.getAllActiveBorrowers();
+        if (activeBorrowers.length === 0) {
+          return bot.sendMessage(chatId, tr(chatId, "No active loans found to edit.", "មិនមានការខ្ចីសកម្មសម្រាប់កែប្រែទេ។"));
+        }
+        const rows = activeBorrowers.map((b) => [
+          {
+            text: `👤 ${b.borrowerName} (${b.itemCount} items, ${b.totalQuantity} units)`,
+            callback_data: `edtl_bor:${encodeURIComponent(b.borrowerName)}`,
+          },
+        ]);
+        rows.push([{ text: t(chatId, "cancel"), callback_data: "borm_cancel" }]);
+        return bot.sendMessage(
+          chatId,
+          tr(chatId, "Select a borrower whose loan entry you want to edit:", "ជ្រើសរើសអ្នកខ្ចីដែលចង់កែប្រែប្រវត្តិខ្ចី៖"),
+          { reply_markup: { inline_keyboard: rows } }
+        );
+      }
+
+      case "edtl_bor": {
+        const borrowerName = decodeURIComponent(id || "");
+        const loans = await equipmentService.getActiveLoansByBorrower(borrowerName);
+        if (loans.length === 0) {
+          return bot.sendMessage(chatId, tr(chatId, "No active loans found for this borrower.", "មិនមានការខ្ចីសកម្មសម្រាប់អ្នកខ្ចីនេះទេ។"));
+        }
+        const rows = loans.map((l) => [
+          {
+            text: `📦 ${l.equipmentName} (${l.openQuantity} units)`,
+            callback_data: `edtl_pick:${l.equipmentId}:${encodeURIComponent(borrowerName)}`,
+          },
+        ]);
+        rows.push([{ text: t(chatId, "cancel"), callback_data: "borm_cancel" }]);
+        return bot.sendMessage(
+          chatId,
+          tr(chatId, `Active loans for *${esc(borrowerName)}*:\nSelect an item to edit quantity or cancel:`, `ការខ្ចីសកម្មសម្រាប់ *${esc(borrowerName)}*៖\nជ្រើសរើសឧបករណ៍ដើម្បីកែប្រែចំនួន ឬបោះបង់៖`),
+          { parse_mode: "Markdown", reply_markup: { inline_keyboard: rows } }
+        );
+      }
+
+      case "edtl_pick": {
+        const equipId = id;
+        const borrowerName = decodeURIComponent(rest[1] || "");
+        const item = await equipmentService.findById(equipId);
+        if (!item) return bot.sendMessage(chatId, t(chatId, "itemGone"));
+        const rows = [
+          [
+            { text: tr(chatId, "✏️ Edit Borrowed Qty", "✏️ កែប្រែចំនួនខ្ចី"), callback_data: `edtl_qty:${equipId}:${encodeURIComponent(borrowerName)}` },
+          ],
+          [
+            { text: tr(chatId, "🗑️ Cancel Loan Entry", "🗑️ បោះបង់ការខ្ចីនេះ"), callback_data: `edtl_del:${equipId}:${encodeURIComponent(borrowerName)}` },
+          ],
+          [{ text: t(chatId, "cancel"), callback_data: "borm_cancel" }],
+        ];
+        return bot.sendMessage(
+          chatId,
+          tr(chatId, `Loan Entry: *${esc(item.equipmentName)}* for *${esc(borrowerName)}*\nSelect action:`, `ទិន្នន័យខ្ចី៖ *${esc(item.equipmentName)}* សម្រាប់ *${esc(borrowerName)}*\nជ្រើសរើសសកម្មភាព៖`),
+          { parse_mode: "Markdown", reply_markup: { inline_keyboard: rows } }
+        );
+      }
+
+      case "edtl_qty": {
+        const equipId = id;
+        const borrowerName = decodeURIComponent(rest[1] || "");
+        const item = await equipmentService.findById(equipId);
+        if (!item) return bot.sendMessage(chatId, t(chatId, "itemGone"));
+        setSession(chatId, { flow: "edit_loan", step: "qty", data: { equipmentId: equipId, borrowerName, equipmentName: item.equipmentName } });
+        return bot.sendMessage(
+          chatId,
+          tr(
+            chatId,
+            `Type new borrowed quantity for *${esc(borrowerName)}* on *${esc(item.equipmentName)}*:`,
+            `សូមវាយចំនួនខ្ចីថ្មីសម្រាប់ *${esc(borrowerName)}* លើឧបករណ៍ *${esc(item.equipmentName)}*៖`
+          ),
+          { parse_mode: "Markdown" }
+        );
+      }
+
+      case "edtl_del": {
+        const equipId = id;
+        const borrowerName = decodeURIComponent(rest[1] || "");
+        const reporter = await resolveReporter(query.from);
+        const res = await equipmentService.updateLoanQuantity(equipId, borrowerName, 0, reporter);
+        if (res.error) {
+          return bot.sendMessage(chatId, tr(chatId, "Failed to update loan.", "មិនអាចកែប្រែការខ្ចីបានទេ។"));
+        }
+        return bot.sendMessage(
+          chatId,
+          tr(
+            chatId,
+            `Cancelled loan entry for *${esc(borrowerName)}* on *${esc(res.item.equipmentName)}*. Restored stock!`,
+            `បានបោះបង់ការខ្ចីសម្រាប់ *${esc(borrowerName)}* លើ *${esc(res.item.equipmentName)}*។ បានស្ដារស្តុកឡើងវិញ!`
+          ),
+          { parse_mode: "Markdown" }
+        );
+      }
+
+      case "edtm_stockin": {
+        return sendEquipmentPicker(chatId, "edts_pick", 0, false);
+      }
+
+      case "edts_pick": {
+        const item = await equipmentService.findById(id);
+        if (!item) return bot.sendMessage(chatId, t(chatId, "itemGone"));
+        const reporter = await resolveReporter(query.from);
+        setSession(chatId, { flow: "add_stock", step: "qty", data: { equipmentId: item.id, equipmentName: item.equipmentName, item, reporter } });
+        return bot.sendMessage(
+          chatId,
+          tr(
+            chatId,
+            `Adding stock for *${esc(item.equipmentName)}*\nCurrent Total: ${item.totalQuantity} | Available: ${item.availableQuantity}\n\nType the number of units to ADD:`,
+            `បន្ថែមស្តុកសម្រាប់ *${esc(item.equipmentName)}*\nសរុបបច្ចុប្បន្ន៖ ${item.totalQuantity} | សល់៖ ${item.availableQuantity}\n\nសូមវាយចំនួនគ្រឿងដែលត្រូវបន្ថែម៖`
+          ),
+          { parse_mode: "Markdown" }
+        );
+      }
       case "add": {
         setSession(chatId, { flow: "add", step: "name", data: {} });
         return bot.sendMessage(chatId, tr(chatId, "Let's add new equipment. What's the equipment name?", "តោះបញ្ចូលឧបករណ៍ថ្មី។ ឈ្មោះឧបករណ៍ជាអ្វី?"));
@@ -1986,9 +2254,9 @@ bot.on("message", async (msg) => {
     return sendReportMenu(chatId);
   }
 
-  if (text.includes("Help") || text.includes("ជំនួយ")) {
+  if (text.includes("Edit") || text.includes("កែប្រែ")) {
     clearSession(chatId);
-    return sendHelp(chatId);
+    return sendEditMasterMenu(chatId);
   }
 
   const session = getSession(chatId);
@@ -2181,6 +2449,78 @@ bot.on("message", async (msg) => {
 
         return bot.sendMessage(chatId, tr(chatId, "Send a photo, or type /skip.", "ផ្ញើរូបភាព ឬវាយ /skip។"));
       }
+    }
+
+    // ---- add_stock flow ----
+    if (session.flow === "add_stock" && session.step === "qty") {
+      const qtyToAdd = Number(msg.text.trim());
+      if (Number.isNaN(qtyToAdd) || qtyToAdd <= 0) {
+        return bot.sendMessage(chatId, tr(chatId, "Please enter a valid positive number for stock addition.", "សូមបញ្ចូលចំនួនវិជ្ជមានដែលត្រឹមត្រូវ។"));
+      }
+      const { equipmentId, reporter } = session.data;
+      const result = await equipmentService.addStock(equipmentId, qtyToAdd, reporter);
+      clearSession(chatId);
+      if (result.error) {
+        return bot.sendMessage(chatId, tr(chatId, "Failed to add stock.", "មិនអាចបន្ថែមស្តុកបានទេ។"));
+      }
+      const addedBy = result.logEntry.addedBy ? `\n${tr(chatId, "Added by", "បានបន្ថែមដោយ")}: ${esc(result.logEntry.addedBy)}` : "";
+      await bot.sendMessage(
+        chatId,
+        tr(
+          chatId,
+          `✅ Added +${qtyToAdd} units to *${esc(result.item.equipmentName)}*.\nNew Total Stock: ${result.item.totalQuantity} (Available: ${result.item.availableQuantity}).${addedBy}`,
+          `✅ បានបន្ថែម +${qtyToAdd} គ្រឿង ទៅលើ *${esc(result.item.equipmentName)}*។\nស្តុកសរុបថ្មី៖ ${result.item.totalQuantity} (សល់៖ ${result.item.availableQuantity})។${addedBy}`
+        ),
+        { parse_mode: "Markdown" }
+      );
+      return sendView(chatId, result.item);
+    }
+
+    // ---- edit_borrower flow ----
+    if (session.flow === "edit_borrower" && session.step === "rename") {
+      const newName = msg.text.trim();
+      const { oldName } = session.data;
+      if (!newName) {
+        return bot.sendMessage(chatId, tr(chatId, "Borrower name cannot be empty.", "ឈ្មោះអ្នកខ្ចីមិនអាចទទេបានទេ។"));
+      }
+      clearSession(chatId);
+      const res = await equipmentService.renameBorrowerGlobal(oldName, newName);
+      return bot.sendMessage(
+        chatId,
+        tr(
+          chatId,
+          `✅ Renamed borrower from *${esc(oldName)}* to *${esc(newName)}* across all active records.`,
+          `✅ បានប្តូរឈ្មោះអ្នកខ្ចីពី *${esc(oldName)}* ទៅជា *${esc(newName)}* លើគ្រប់ទិន្នន័យរួចរាល់។`
+        ),
+        { parse_mode: "Markdown" }
+      );
+    }
+
+    // ---- edit_loan flow ----
+    if (session.flow === "edit_loan" && session.step === "qty") {
+      const newQty = Number(msg.text.trim());
+      if (Number.isNaN(newQty) || newQty < 0) {
+        return bot.sendMessage(chatId, tr(chatId, "Please enter a valid non-negative number.", "សូមបញ្ចូលចំនួនដែលត្រឹមត្រូវ។"));
+      }
+      const { equipmentId, borrowerName, equipmentName } = session.data;
+      const reporter = await resolveReporter(msg.from);
+      clearSession(chatId);
+      const res = await equipmentService.updateLoanQuantity(equipmentId, borrowerName, newQty, reporter);
+      if (res.error === "insufficient") {
+        return bot.sendMessage(chatId, tr(chatId, `Not enough available stock to increase loan to ${newQty}.`, `មិនមានស្តុកសល់គ្រប់គ្រាន់សម្រាប់កើនឡើងដល់ ${newQty} ទេ។`));
+      }
+      if (res.error) {
+        return bot.sendMessage(chatId, tr(chatId, "Failed to update loan quantity.", "មិនអាចកែប្រែចំនួនខ្ចីបានទេ។"));
+      }
+      return bot.sendMessage(
+        chatId,
+        tr(
+          chatId,
+          `✅ Updated borrowed quantity to ${newQty} units for *${esc(borrowerName)}* on *${esc(equipmentName)}*.`,
+          `✅ បានកែប្រែចំនួនខ្ចីទៅជា ${newQty} គ្រឿង សម្រាប់ *${esc(borrowerName)}* លើ *${esc(equipmentName)}* រួចរាល់។`
+        ),
+        { parse_mode: "Markdown" }
+      );
     }
   } catch (err) {
     console.error("[TelegramBot] flow error:", err);

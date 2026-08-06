@@ -401,8 +401,43 @@ async function generateStockHistoryReport() {
     }).font = { name: "Arial", size: 10 };
   });
 
+  const stockInSheet = createSheet(workbook, "Stock In Log", [
+    { header: "Equipment Name", key: "equipmentName", width: 28 },
+    { header: "Added Qty", key: "addedQty", width: 14 },
+    { header: "Old Total", key: "oldTotal", width: 14 },
+    { header: "New Total", key: "newTotal", width: 14 },
+    { header: "Added At", key: "addedAt", width: 22 },
+    { header: "Added By", key: "addedBy", width: 22 },
+  ]);
+
+  const stockInEvents = items
+    .flatMap((item) => {
+      const history = Array.isArray(item.stockInHistory) ? item.stockInHistory : [];
+      return history.map((e) => ({
+        equipmentName: item.equipmentName || "",
+        addedQty: e.addedQty || 0,
+        oldTotal: e.oldTotal || 0,
+        newTotal: e.newTotal || 0,
+        addedAt: e.addedAt || null,
+        addedBy: e.addedBy || "",
+      }));
+    })
+    .sort((a, b) => (toDate(b.addedAt)?.getTime() || 0) - (toDate(a.addedAt)?.getTime() || 0));
+
+  stockInEvents.forEach((ev) => {
+    stockInSheet.addRow({
+      equipmentName: ev.equipmentName,
+      addedQty: ev.addedQty,
+      oldTotal: ev.oldTotal,
+      newTotal: ev.newTotal,
+      addedAt: formatTimestamp(ev.addedAt),
+      addedBy: ev.addedBy,
+    }).font = { name: "Arial", size: 10 };
+  });
+
   styleTableBorders(stockSheet, stockSheet.rowCount, 8);
   styleTableBorders(historySheet, historySheet.rowCount, 6);
+  styleTableBorders(stockInSheet, stockInSheet.rowCount, 6);
 
   return writeWorkbookToTemp(workbook, "OSH-Stock-History-Report");
 }

@@ -753,6 +753,128 @@ async function returnAllByBorrower(borrowerName, reporter) {
   return returnMultiple(itemsToReturn, borrowerName, reporter);
 }
 
+/**
+ * Add stock to an existing equipment item with audit logging.
+ */
+async function addStock(equipmentId, qtyToAdd, reporter) {
+  const item = await findById(equipmentId);
+  if (!item) return { error: "not_found" };
+
+  const amount = Number(qtyToAdd);
+  if (!amount || amount <= 0) return { error: "bad_quantity" };
+
+  const totalQuantity = (Number(item.totalQuantity) || 0) + amount;
+  const availableQuantity = (Number(item.availableQuantity) || 0) + amount;
+  const status = computeStatus(availableQuantity, item.minimumStockLevel);
+
+  const addedAt = admin.firestore.Timestamp.now();
+  const addedBy = String((reporter && reporter.name) || "Admin").trim();
+  const addedById = String((reporter && reporter.id) || "").trim();
+
+  const logEntry = {
+    addedQty: amount,
+    oldTotal: item.totalQuantity,
+    newTotal: totalQuantity,
+    addedAt,
+    addedBy,
+    addedById,
+  };
+
+  await db.collection(COLLECTION).doc(item.id).update({
+    totalQuantity,
+    availableQuantity,
+    status,
+    stockInHistory: admin.firestore.FieldValue.arrayUnion(logEntry),
+    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+  });
+
+  return {
+    item: { ...item, totalQuantity, availableQuantity, status },
+    logEntry,
+  };
+}
+
+/**
+ * Update quantity on an active loan for a borrower on a specific equipment item.
+ */
+async function updateLoanQuantity(equipmentId, borrowerName, newQty, reporter) {
+  const item = await findById(equipmentId);
+  if (!item) return { error: "not_found" };
+
+  const amount = Number(newQty);
+  if (Number.isNaN(amount) || amount < 0) return { error: "bad_quantity" };
+
+  const target = normalizeBorrower(borrowerName);
+  const activeLoans = getActiveLoans(item);
+  const loanIndex = activeLoans.findIndex((l) => normalizeBorrower(l.borrowerName) === target);
+
+  if (loanIndex < 0) return { error: "loan_not_found" };
+
+  const oldLoan = activeLoans[loanIndex];
+  const oldOpenQty = getOpenQuantity(oldLoan);
+  const diff = amount - oldOpenQty;
+
+  if (diff > 0 && diff > item.availableQuantity) {
+    return { error: "insufficient", available: item.availableQuantity };
+  }
+
+  const availableQuantity = item.availableQuantity - diff;
+  const borrowedQuantity = item.borrowedQuantity + diff;
+  const status = computeStatus(availableQuantity, item.minimumStockLevel);
+
+  if (amount === 0) {
+    activeLoans.splice(loanIndex, 1);
+  } else {
+    activeLoans[loanIndex] = {
+      ...oldLoan,
+      remainingQuantity: amount,
+      quantity: amount,
+      updatedAt: admin.firestore.Timestamp.now(),
+      reportedBy: String((reporter && reporter.name) || oldLoan.reportedBy).trim(),
+    };
+  }
+
+  await db.collection(COLLECTION).doc(item.id).update({
+    availableQuantity,
+    borrowedQuantity,
+    status,
+    activeLoans,
+    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+  });
+
+  return { item: { ...item, availableQuantity, borrowedQuantity, status, activeLoans } };
+}
+
+/**
+ * Rename borrower across all equipment items globally.
+ */
+async function renameBorrowerGlobal(oldBorrowerName, newBorrowerName) {
+  const items = await getAll();
+  let updatedCount = 0;
+
+  for (const item of items) {
+    const res = await renameBorrowerRecord(item.equipmentName, oldBorrowerName, newBorrowerName);
+    if (!res.error) updatedCount++;
+  }
+
+  return { updatedCount, oldBorrowerName, newBorrowerName };
+}
+
+/**
+ * Delete borrower records across all equipment items globally.
+ */
+async function deleteBorrowerGlobal(borrowerName) {
+  const items = await getAll();
+  let updatedCount = 0;
+
+  for (const item of items) {
+    const res = await deleteBorrowerRecord(item.equipmentName, borrowerName);
+    if (!res.error) updatedCount++;
+  }
+
+  return { updatedCount, borrowerName };
+}
+
 module.exports = {
   findByName,
   findById,
@@ -760,6 +882,10 @@ module.exports = {
   searchEquipment,
   createEquipment,
   editField,
+  addStock,
+  updateLoanQuantity,
+  renameBorrowerGlobal,
+  deleteBorrowerGlobal,
   borrow,
   borrowMultiple,
   returnItem,
