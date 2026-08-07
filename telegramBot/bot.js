@@ -252,17 +252,46 @@ function formatItem(item) {
   const total = Number.isNaN(Number(item.totalQuantity)) ? 0 : (Number(item.totalQuantity) || 0);
   const borrowed = Number.isNaN(Number(item.borrowedQuantity)) ? 0 : (Number(item.borrowedQuantity) || 0);
 
+  const activeLoans = Array.isArray(item.activeLoans) ? item.activeLoans.filter((l) => openQuantity(l) > 0) : [];
+
+  let borrowersEn = "\n\n<b>Active Borrowers:</b>\n";
+  let borrowersKm = "\n\n<b>អ្នកខ្ចីសកម្ម៖</b>\n";
+
+  if (activeLoans.length === 0) {
+    borrowersEn += "None";
+    borrowersKm += "មិនមាន";
+  } else {
+    const listEn = activeLoans.map((l) => {
+      const bName = escHtml(l.borrowerName || "Unknown");
+      const qty = openQuantity(l);
+      const timeStr = formatTimestamp(l.borrowedAt);
+      return `• 👤 <b>${bName}</b> — ${qty}x (${timeStr})`;
+    }).join("\n");
+
+    const listKm = activeLoans.map((l) => {
+      const bName = escHtml(l.borrowerName || "Unknown");
+      const qty = openQuantity(l);
+      const timeStr = formatTimestamp(l.borrowedAt);
+      return `• 👤 <b>${bName}</b> — ${qty} គ្រឿង (${timeStr})`;
+    }).join("\n");
+
+    borrowersEn += listEn;
+    borrowersKm += listKm;
+  }
+
   return {
     en:
       `<b>${nameDisplay}</b>\n` +
       (item.model ? `Model: ${escHtml(item.model)}\n` : "") +
       `Available: ${avail} / ${total}  |  Borrowed: ${borrowed}\n` +
-      `Status: ${item.status}`,
+      `Status: ${item.status}` +
+      borrowersEn,
     km:
       `<b>${nameDisplay}</b>\n` +
       (item.model ? `ម៉ូឌែល៖ ${escHtml(item.model)}\n` : "") +
       `សល់ក្នុងស្តុក៖ ${avail} / ${total}  |  ខ្ចីចេញ៖ ${borrowed}\n` +
-      `ស្ថានភាព៖ ${item.status}`,
+      `ស្ថានភាព៖ ${item.status}` +
+      borrowersKm,
   };
 }
 
