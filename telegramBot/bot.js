@@ -248,16 +248,20 @@ function formatItem(item) {
     nameDisplay = `${escHtml(nameKhmer)} (${escHtml(nameEnglish)})`;
   }
 
+  const avail = Number.isNaN(Number(item.availableQuantity)) ? 0 : (Number(item.availableQuantity) || 0);
+  const total = Number.isNaN(Number(item.totalQuantity)) ? 0 : (Number(item.totalQuantity) || 0);
+  const borrowed = Number.isNaN(Number(item.borrowedQuantity)) ? 0 : (Number(item.borrowedQuantity) || 0);
+
   return {
     en:
       `<b>${nameDisplay}</b>\n` +
       (item.model ? `Model: ${escHtml(item.model)}\n` : "") +
-      `Available: ${item.availableQuantity} / ${item.totalQuantity}  |  Borrowed: ${item.borrowedQuantity}\n` +
+      `Available: ${avail} / ${total}  |  Borrowed: ${borrowed}\n` +
       `Status: ${item.status}`,
     km:
       `<b>${nameDisplay}</b>\n` +
       (item.model ? `ម៉ូឌែល៖ ${escHtml(item.model)}\n` : "") +
-      `សល់ក្នុងស្តុក៖ ${item.availableQuantity} / ${item.totalQuantity}  |  ខ្ចីចេញ៖ ${item.borrowedQuantity}\n` +
+      `សល់ក្នុងស្តុក៖ ${avail} / ${total}  |  ខ្ចីចេញ៖ ${borrowed}\n` +
       `ស្ថានភាព៖ ${item.status}`,
   };
 }

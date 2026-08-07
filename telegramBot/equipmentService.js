@@ -121,6 +121,58 @@ function allocateReturn(loans, amount, borrowerName) {
   };
 }
 
+function sanitizeEquipment(d) {
+  if (!d) return null;
+  const data = typeof d.data === "function" ? d.data() : d;
+  if (!data) return null;
+  const id = d.id || data.id;
+
+  const totalQuantity = Math.max(0, Number(data.totalQuantity) || 0);
+  const activeLoans = Array.isArray(data.activeLoans) ? data.activeLoans : [];
+
+  let borrowedQuantity = Number(data.borrowedQuantity);
+  if (Number.isNaN(borrowedQuantity) || borrowedQuantity < 0) {
+    borrowedQuantity = activeLoans.reduce((sum, loan) => {
+      const openQty = Number(loan.remainingQuantity ?? loan.quantity ?? 0) || 0;
+      return sum + openQty;
+    }, 0);
+  }
+
+  let availableQuantity = Number(data.availableQuantity);
+  if (Number.isNaN(availableQuantity) || availableQuantity < 0 || availableQuantity > totalQuantity) {
+    availableQuantity = Math.max(0, totalQuantity - borrowedQuantity);
+  }
+
+  const status = computeStatus(availableQuantity, data.minimumStockLevel || 0);
+
+  // Self-heal corrupted numeric values in Firestore
+  if (
+    Number.isNaN(Number(data.availableQuantity)) ||
+    Number.isNaN(Number(data.borrowedQuantity)) ||
+    Number.isNaN(Number(data.totalQuantity)) ||
+    data.availableQuantity === null ||
+    data.availableQuantity === undefined
+  ) {
+    if (id && db) {
+      db.collection(COLLECTION).doc(id).update({
+        totalQuantity,
+        availableQuantity,
+        borrowedQuantity,
+        status,
+      }).catch((err) => console.error(`[sanitizeEquipment] Self-heal doc ${id} failed:`, err.message));
+    }
+  }
+
+  return {
+    id,
+    ...data,
+    totalQuantity,
+    availableQuantity,
+    borrowedQuantity,
+    status,
+  };
+}
+
 async function findByName(equipmentName) {
   const target = normalizeLookup(equipmentName);
   if (!target) return null;
@@ -135,14 +187,14 @@ async function findByName(equipmentName) {
 
 async function getAll() {
   const snap = await db.collection(COLLECTION).orderBy("createdAt", "desc").get();
-  return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+  return snap.docs.map((d) => sanitizeEquipment(d));
 }
 
 async function findById(id) {
   if (!id) return null;
   const doc = await db.collection(COLLECTION).doc(id).get();
   if (!doc.exists) return null;
-  return { id: doc.id, ...doc.data() };
+  return sanitizeEquipment(doc);
 }
 
 // Fuzzy / partial name search. Used to suggest "Did you mean …?" when an
