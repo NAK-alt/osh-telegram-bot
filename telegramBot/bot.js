@@ -997,6 +997,7 @@ function renderBorrowCart(chatId, sessionData) {
   const rows = [];
   rows.push([{ text: tr(chatId, "➕ Add another item", "➕ បន្ថែមឧបករណ៍មួយទៀត"), callback_data: "borm_add" }]);
   if (items.length > 0) {
+    rows.push([{ text: tr(chatId, "✏️ Edit Cart Items", "✏️ កែប្រែបញ្ជីឧបករណ៍"), callback_data: "borm_edit_cart" }]);
     rows.push([{ text: tr(chatId, "✅ Finish & Confirm Borrow", "✅ បញ្ចប់ និងខ្ចី"), callback_data: "borm_fin" }]);
   }
   rows.push([{ text: t(chatId, "cancel"), callback_data: "borm_cancel" }]);
@@ -1023,6 +1024,7 @@ function renderReturnCart(chatId, sessionData) {
   const rows = [];
   rows.push([{ text: tr(chatId, "➕ Add another item", "➕ បន្ថែមឧបករណ៍មួយទៀត"), callback_data: "retm_add" }]);
   if (items.length > 0) {
+    rows.push([{ text: tr(chatId, "✏️ Edit Cart Items", "✏️ កែប្រែបញ្ជីឧបករណ៍"), callback_data: "retm_edit_cart" }]);
     rows.push([{ text: tr(chatId, "✅ Finish & Confirm Return", "✅ បញ្ចប់ និងប្រគល់"), callback_data: "retm_fin" }]);
   }
   rows.push([{ text: t(chatId, "cancel"), callback_data: "retm_cancel" }]);
@@ -2283,6 +2285,90 @@ bot.on("callback_query", async (query) => {
         return sendMultiBorrowResult(chatId, result, reporter ? reporter.name : "");
       }
 
+      case "borm_edit_cart": {
+        const session = getSession(chatId);
+        if (!session || session.flow !== "borrow_multi") return;
+        const items = session.data.items || [];
+        if (items.length === 0) {
+          return bot.sendMessage(chatId, tr(chatId, "Cart is empty.", "បញ្ជីទទេស្អាត។"));
+        }
+        const rows = items.map((it, idx) => [
+          {
+            text: `✏️ ${idx + 1}. ${it.equipmentName} (${it.qty}x)`,
+            callback_data: `borm_edit_item:${idx}`,
+          },
+        ]);
+        rows.push([{ text: tr(chatId, "⬅️ Back to Cart", "⬅️ ត្រឡប់ទៅបញ្ជីវិញ"), callback_data: "borm_back_cart" }]);
+        return bot.sendMessage(
+          chatId,
+          tr(chatId, "Select an item in your cart to edit or remove:", "ជ្រើសរើសឧបករណ៍ក្នុងបញ្ជីដើម្បីកែប្រែ ឬលុបចេញ៖"),
+          { reply_markup: { inline_keyboard: rows } }
+        );
+      }
+
+      case "borm_back_cart": {
+        const session = getSession(chatId);
+        if (!session || session.flow !== "borrow_multi") return;
+        session.step = "cart";
+        setSession(chatId, session);
+        const cartUI = renderBorrowCart(chatId, session.data);
+        return bot.sendMessage(chatId, cartUI.text, { parse_mode: "Markdown", reply_markup: cartUI.reply_markup });
+      }
+
+      case "borm_edit_item": {
+        const session = getSession(chatId);
+        if (!session || session.flow !== "borrow_multi") return;
+        const idx = Number(id);
+        const item = session.data.items ? session.data.items[idx] : null;
+        if (!item) return bot.sendMessage(chatId, t(chatId, "itemGone"));
+
+        const rows = [
+          [
+            { text: tr(chatId, "🔢 Change Quantity", "🔢 ប្តូរចំនួន"), callback_data: `borm_change_qty:${idx}` },
+          ],
+          [
+            { text: tr(chatId, "🗑️ Remove from Cart", "🗑️ លុបចេញពីបញ្ជី"), callback_data: `borm_rem_item:${idx}` },
+          ],
+          [{ text: tr(chatId, "⬅️ Back", "⬅️ ត្រឡប់"), callback_data: "borm_edit_cart" }],
+        ];
+        return bot.sendMessage(
+          chatId,
+          tr(chatId, `Item: *${esc(item.equipmentName)}* (${item.qty}x)\nWhat would you like to edit?`, `ឧបករណ៍៖ *${esc(item.equipmentName)}* (${item.qty}គ្រឿង)\nតើអ្នកចង់កែប្រែអ្វី?`),
+          { parse_mode: "Markdown", reply_markup: { inline_keyboard: rows } }
+        );
+      }
+
+      case "borm_change_qty": {
+        const session = getSession(chatId);
+        if (!session || session.flow !== "borrow_multi") return;
+        const idx = Number(id);
+        const item = session.data.items ? session.data.items[idx] : null;
+        if (!item) return bot.sendMessage(chatId, t(chatId, "itemGone"));
+        session.step = "edit_cart_qty";
+        session.data.editIndex = idx;
+        setSession(chatId, session);
+        return bot.sendMessage(
+          chatId,
+          tr(chatId, `Type new quantity for *${esc(item.equipmentName)}*:`, `សូមវាយចំនួនថ្មីសម្រាប់ *${esc(item.equipmentName)}*៖`),
+          { parse_mode: "Markdown" }
+        );
+      }
+
+      case "borm_rem_item": {
+        const session = getSession(chatId);
+        if (!session || session.flow !== "borrow_multi") return;
+        const idx = Number(id);
+        if (session.data.items && session.data.items[idx]) {
+          const removedName = session.data.items[idx].equipmentName;
+          session.data.items.splice(idx, 1);
+          session.step = "cart";
+          setSession(chatId, session);
+          await bot.sendMessage(chatId, tr(chatId, `Removed *${esc(removedName)}* from cart.`, `បានលុប *${esc(removedName)}* ចេញពីបញ្ជីខ្ចី។`), { parse_mode: "Markdown" });
+        }
+        const cartUI = renderBorrowCart(chatId, session.data);
+        return bot.sendMessage(chatId, cartUI.text, { parse_mode: "Markdown", reply_markup: cartUI.reply_markup });
+      }
+
       case "borm_cancel":
       case "retm_cancel":
       case "edte_pick_cancel":
@@ -2415,6 +2501,90 @@ bot.on("callback_query", async (query) => {
         const result = await equipmentService.returnMultiple(items, borrowerName || "", reporter);
         clearSession(chatId);
         return sendMultiReturnResult(chatId, result, reporter ? reporter.name : "");
+      }
+
+      case "retm_edit_cart": {
+        const session = getSession(chatId);
+        if (!session || session.flow !== "return_multi") return;
+        const items = session.data.items || [];
+        if (items.length === 0) {
+          return bot.sendMessage(chatId, tr(chatId, "Return cart is empty.", "បញ្ជីប្រគល់ទទេស្អាត។"));
+        }
+        const rows = items.map((it, idx) => [
+          {
+            text: `✏️ ${idx + 1}. ${it.equipmentName} (${it.qty}x)`,
+            callback_data: `retm_edit_item:${idx}`,
+          },
+        ]);
+        rows.push([{ text: tr(chatId, "⬅️ Back to Cart", "⬅️ ត្រឡប់ទៅបញ្ជីវិញ"), callback_data: "retm_back_cart" }]);
+        return bot.sendMessage(
+          chatId,
+          tr(chatId, "Select an item in your return cart to edit or remove:", "ជ្រើសរើសឧបករណ៍ក្នុងបញ្ជីប្រគល់ដើម្បីកែប្រែ ឬលុបចេញ៖"),
+          { reply_markup: { inline_keyboard: rows } }
+        );
+      }
+
+      case "retm_back_cart": {
+        const session = getSession(chatId);
+        if (!session || session.flow !== "return_multi") return;
+        session.step = "cart";
+        setSession(chatId, session);
+        const cartUI = renderReturnCart(chatId, session.data);
+        return bot.sendMessage(chatId, cartUI.text, { parse_mode: "Markdown", reply_markup: cartUI.reply_markup });
+      }
+
+      case "retm_edit_item": {
+        const session = getSession(chatId);
+        if (!session || session.flow !== "return_multi") return;
+        const idx = Number(id);
+        const item = session.data.items ? session.data.items[idx] : null;
+        if (!item) return bot.sendMessage(chatId, t(chatId, "itemGone"));
+
+        const rows = [
+          [
+            { text: tr(chatId, "🔢 Change Quantity", "🔢 ប្តូរចំនួន"), callback_data: `retm_change_qty:${idx}` },
+          ],
+          [
+            { text: tr(chatId, "🗑️ Remove from Cart", "🗑️ លុបចេញពីបញ្ជី"), callback_data: `retm_rem_item:${idx}` },
+          ],
+          [{ text: tr(chatId, "⬅️ Back", "⬅️ ត្រឡប់"), callback_data: "retm_edit_cart" }],
+        ];
+        return bot.sendMessage(
+          chatId,
+          tr(chatId, `Item: *${esc(item.equipmentName)}* (${item.qty}x)\nWhat would you like to edit?`, `ឧបករណ៍៖ *${esc(item.equipmentName)}* (${item.qty}គ្រឿង)\nតើអ្នកចង់កែប្រែអ្វី?`),
+          { parse_mode: "Markdown", reply_markup: { inline_keyboard: rows } }
+        );
+      }
+
+      case "retm_change_qty": {
+        const session = getSession(chatId);
+        if (!session || session.flow !== "return_multi") return;
+        const idx = Number(id);
+        const item = session.data.items ? session.data.items[idx] : null;
+        if (!item) return bot.sendMessage(chatId, t(chatId, "itemGone"));
+        session.step = "edit_cart_qty";
+        session.data.editIndex = idx;
+        setSession(chatId, session);
+        return bot.sendMessage(
+          chatId,
+          tr(chatId, `Type new return quantity for *${esc(item.equipmentName)}*:`, `សូមវាយចំនួនប្រគល់ថ្មីសម្រាប់ *${esc(item.equipmentName)}*៖`),
+          { parse_mode: "Markdown" }
+        );
+      }
+
+      case "retm_rem_item": {
+        const session = getSession(chatId);
+        if (!session || session.flow !== "return_multi") return;
+        const idx = Number(id);
+        if (session.data.items && session.data.items[idx]) {
+          const removedName = session.data.items[idx].equipmentName;
+          session.data.items.splice(idx, 1);
+          session.step = "cart";
+          setSession(chatId, session);
+          await bot.sendMessage(chatId, tr(chatId, `Removed *${esc(removedName)}* from return cart.`, `បានលុប *${esc(removedName)}* ចេញពីបញ្ជីប្រគល់។`), { parse_mode: "Markdown" });
+        }
+        const cartUI = renderReturnCart(chatId, session.data);
+        return bot.sendMessage(chatId, cartUI.text, { parse_mode: "Markdown", reply_markup: cartUI.reply_markup });
       }
 
       default:
@@ -2592,6 +2762,20 @@ bot.on("message", async (msg) => {
         const cartUI = renderBorrowCart(chatId, session.data);
         return bot.sendMessage(chatId, cartUI.text, { parse_mode: "Markdown", reply_markup: cartUI.reply_markup });
       }
+
+      if (session.step === "edit_cart_qty") {
+        const qty = Number((msg.text || "").trim());
+        const idx = session.data.editIndex;
+        if (Number.isNaN(qty) || qty <= 0 || !session.data.items || !session.data.items[idx]) {
+          return bot.sendMessage(chatId, tr(chatId, "Please enter a valid positive number for quantity.", "សូមបញ្ចូលចំនួនវិជ្ជមានដែលត្រឹមត្រូវ។"));
+        }
+        session.data.items[idx].qty = qty;
+        session.step = "cart";
+        setSession(chatId, session);
+
+        const cartUI = renderBorrowCart(chatId, session.data);
+        return bot.sendMessage(chatId, cartUI.text, { parse_mode: "Markdown", reply_markup: cartUI.reply_markup });
+      }
     }
 
     // ---- return_multi flow ----
@@ -2612,6 +2796,20 @@ bot.on("message", async (msg) => {
         session.data.items = session.data.items || [];
         session.data.items.push({ id: item.id, equipmentName: item.equipmentName, qty });
         session.data.currentItem = null;
+        session.step = "cart";
+        setSession(chatId, session);
+
+        const cartUI = renderReturnCart(chatId, session.data);
+        return bot.sendMessage(chatId, cartUI.text, { parse_mode: "Markdown", reply_markup: cartUI.reply_markup });
+      }
+
+      if (session.step === "edit_cart_qty") {
+        const qty = Number((msg.text || "").trim());
+        const idx = session.data.editIndex;
+        if (Number.isNaN(qty) || qty <= 0 || !session.data.items || !session.data.items[idx]) {
+          return bot.sendMessage(chatId, tr(chatId, "Please enter a valid positive number for quantity.", "សូមបញ្ចូលចំនួនវិជ្ជមានដែលត្រឹមត្រូវ។"));
+        }
+        session.data.items[idx].qty = qty;
         session.step = "cart";
         setSession(chatId, session);
 
