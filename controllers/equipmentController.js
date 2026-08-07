@@ -143,8 +143,17 @@ async function updateEquipment(req, res, next) {
 
     // Normalize numeric fields if present
     ["totalQuantity", "availableQuantity", "borrowedQuantity", "minimumStockLevel"].forEach((f) => {
-      if (updates[f] !== undefined) updates[f] = Number(updates[f]);
+      if (updates[f] !== undefined && updates[f] !== "") updates[f] = Number(updates[f]);
     });
+
+    const effectiveTotal = updates.totalQuantity !== undefined ? updates.totalQuantity : existingData.totalQuantity;
+    const effectiveBorrowed = updates.borrowedQuantity !== undefined ? updates.borrowedQuantity : (existingData.borrowedQuantity || 0);
+
+    if (updates.availableQuantity === undefined && (updates.totalQuantity !== undefined || updates.borrowedQuantity !== undefined)) {
+      updates.availableQuantity = Math.max(0, effectiveTotal - effectiveBorrowed);
+    }
+
+    const effectiveAvailable = updates.availableQuantity !== undefined ? updates.availableQuantity : (existingData.availableQuantity || 0);
 
     // If a new image was uploaded, replace the old one (Storage or legacy disk).
     if (req.file) {
@@ -155,12 +164,6 @@ async function updateEquipment(req, res, next) {
       });
       updates.imagePath = storagePath;
     }
-
-    // Auto status based on stock
-    const effectiveAvailable =
-      updates.availableQuantity !== undefined ? updates.availableQuantity : existingData.availableQuantity;
-    const effectiveMin =
-      updates.minimumStockLevel !== undefined ? updates.minimumStockLevel : existingData.minimumStockLevel;
 
     if (effectiveAvailable <= 0) updates.status = "Out of Stock";
     else updates.status = "Available";

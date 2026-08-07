@@ -1033,14 +1033,20 @@ function sendMultiReturnResult(chatId, result, reporterName) {
   );
 }
 
-async function sendEquipmentPicker(chatId, prefix, page = 0, filterActiveOnly = false) {
+async function sendEquipmentPicker(chatId, prefix, page = 0, filterActiveOnly = false, messageIdToEdit = null) {
   let items = await equipmentService.getAll();
   if (filterActiveOnly) {
     items = items.filter((it) => it.availableQuantity > 0);
   }
 
   if (items.length === 0) {
-    return bot.sendMessage(chatId, tr(chatId, "No equipment available.", "មិនមានឧបករណ៍ដែលសល់ទេ។"));
+    const text = tr(chatId, "No equipment available.", "មិនមានឧបករណ៍ដែលសល់ទេ។");
+    if (messageIdToEdit) {
+      try {
+        return await bot.editMessageText(text, { chat_id: chatId, message_id: messageIdToEdit });
+      } catch (_) {}
+    }
+    return bot.sendMessage(chatId, text);
   }
 
   const pageLimit = 8;
@@ -1062,9 +1068,20 @@ async function sendEquipmentPicker(chatId, prefix, page = 0, filterActiveOnly = 
   rows.push(nav);
   rows.push([{ text: t(chatId, "cancel"), callback_data: `${prefix}_cancel` }]);
 
+  const text = tr(chatId, "Select an equipment item:", "ជ្រើសរើសឧបករណ៍៖");
+  if (messageIdToEdit) {
+    try {
+      return await bot.editMessageText(text, {
+        chat_id: chatId,
+        message_id: messageIdToEdit,
+        reply_markup: { inline_keyboard: rows },
+      });
+    } catch (_) {}
+  }
+
   return bot.sendMessage(
     chatId,
-    tr(chatId, "Select an equipment item:", "ជ្រើសរើសឧបករណ៍៖"),
+    text,
     { reply_markup: { inline_keyboard: rows } }
   );
 }
@@ -2036,12 +2053,21 @@ bot.on("callback_query", async (query) => {
         return bot.sendMessage(chatId, tr(chatId, "Adding new equipment to inventory. Please enter the equipment name:", "សូមបញ្ចូលឈ្មោះឧបករណ៍ថ្មីដែលត្រូវចុះបញ្ជីចូលក្នុងស្តុក៖"));
       }
 
+      case "borm_pick_pg":
       case "borm_pg":
-      case "retm_pg": {
+      case "retm_pick_pg":
+      case "retm_pg":
+      case "edte_pick_pg":
+      case "edts_pick_pg": {
         const page = Number(rest[0]) || 0;
-        const isBorrow = action === "borm_pg";
-        const prefix = isBorrow ? "borm_pick" : "retm_pick";
-        return sendEquipmentPicker(chatId, prefix, page, isBorrow);
+        const filterActive = action.startsWith("borm");
+        let prefix = "borm_pick";
+        if (action.startsWith("retm")) prefix = "retm_pick";
+        else if (action.startsWith("edte")) prefix = "edte_pick";
+        else if (action.startsWith("edts")) prefix = "edts_pick";
+
+        const messageId = query.message ? query.message.message_id : null;
+        return sendEquipmentPicker(chatId, prefix, page, filterActive, messageId);
       }
 
       case "borgrp": {
@@ -2141,7 +2167,9 @@ bot.on("callback_query", async (query) => {
       }
 
       case "borm_cancel":
-      case "retm_cancel": {
+      case "retm_cancel":
+      case "edte_pick_cancel":
+      case "edts_pick_cancel": {
         clearSession(chatId);
         return bot.sendMessage(chatId, t(chatId, "cancelled"));
       }
