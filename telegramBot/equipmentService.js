@@ -539,23 +539,22 @@ async function deleteBorrowerRecord(equipmentName, borrowerName) {
 // Wipe borrow history + open loans for every equipment item and reset counts so the
 // borrower report comes back empty. Destructive — cannot be undone.
 async function clearAllBorrowHistory() {
+  return clearTransactionHistory(false);
+}
+
+/**
+ * Wipe borrow history, return history, active loans, and stock-in history for all equipment items.
+ * Destructive — cannot be undone.
+ */
+async function clearTransactionHistory(clearStockIn = true) {
   const items = await getAll();
   const batch = db.batch();
   let count = 0;
 
   for (const item of items) {
-    const hasBorrowData =
-      (Array.isArray(item.borrowHistory) && item.borrowHistory.length > 0) ||
-      (Array.isArray(item.returnHistory) && item.returnHistory.length > 0) ||
-      (Array.isArray(item.activeLoans) && item.activeLoans.length > 0) ||
-      (Number(item.borrowedQuantity) || 0) > 0 ||
-      item.lastBorrowedBy;
-
-    if (!hasBorrowData) continue;
-
     const totalQuantity = Number(item.totalQuantity) || 0;
     const minimumStockLevel = Number(item.minimumStockLevel) || 0;
-    batch.update(db.collection(COLLECTION).doc(item.id), {
+    const updateData = {
       borrowHistory: [],
       returnHistory: [],
       activeLoans: [],
@@ -565,9 +564,19 @@ async function clearAllBorrowHistory() {
       lastBorrowedAt: null,
       status: computeStatus(totalQuantity, minimumStockLevel),
       updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-    });
+    };
+    if (clearStockIn) {
+      updateData.stockInHistory = [];
+    }
+    batch.update(db.collection(COLLECTION).doc(item.id), updateData);
     count++;
   }
+
+  if (count > 0) {
+    await batch.commit();
+  }
+  return { count };
+}
 
   if (count > 0) await batch.commit();
   return { clearedItems: count };
@@ -978,6 +987,7 @@ module.exports = {
   hideBorrowerFromReports,
   deleteBorrowerRecord,
   clearAllBorrowHistory,
+  clearTransactionHistory,
   deleteEquipmentByName,
   attachImage,
   EDITABLE_FIELDS,

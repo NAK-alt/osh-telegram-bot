@@ -576,6 +576,12 @@ function sendEditMasterMenu(chatId) {
         callback_data: "edtm_stockin",
       },
     ],
+    [
+      {
+        text: isKm ? "🗑️ លុបប្រវត្តិប្រតិបត្តិការ (Clear History Sheet)" : "🗑️ Clear Transaction History",
+        callback_data: "edtm_clearhist",
+      },
+    ],
     [{ text: t(chatId, "cancel"), callback_data: "borm_cancel" }],
   ];
 
@@ -2082,7 +2088,7 @@ bot.on("callback_query", async (query) => {
 
       case "edtl_del": {
         const equipId = id;
-        const borrowerName = decodeURIComponent(rest[1] || "");
+        const borrowerName = getBorrowerByKey(rest[1] || "");
         const reporter = await resolveReporter(query.from);
         const res = await equipmentService.updateLoanQuantity(equipId, borrowerName, 0, reporter);
         if (res.error) {
@@ -2114,6 +2120,40 @@ bot.on("callback_query", async (query) => {
             chatId,
             `Adding stock for *${esc(item.equipmentName)}*\nCurrent Total: ${item.totalQuantity} | Available: ${item.availableQuantity}\n\nType the number of units to ADD:`,
             `បន្ថែមស្តុកសម្រាប់ *${esc(item.equipmentName)}*\nសរុបបច្ចុប្បន្ន៖ ${item.totalQuantity} | សល់៖ ${item.availableQuantity}\n\nសូមវាយចំនួនគ្រឿងដែលត្រូវបន្ថែម៖`
+          ),
+          { parse_mode: "Markdown" }
+        );
+      }
+
+      case "edtm_clearhist": {
+        const rows = [
+          [
+            {
+              text: tr(chatId, "⚠️ Yes, Clear History", "⚠️ ពិតជាចង់លុបប្រវត្តិ"),
+              callback_data: "edtm_clearhist_do",
+            },
+            { text: t(chatId, "cancel"), callback_data: "borm_cancel" },
+          ],
+        ];
+        return bot.sendMessage(
+          chatId,
+          tr(
+            chatId,
+            "⚠️ *Clear Transaction History*\nAre you sure you want to clear all transaction history from the *ប្រវត្តិប្រតិបត្តិការ* sheet and reset active loans?",
+            "⚠️ *លុបប្រវត្តិប្រតិបត្តិការ*\nតើអ្នកពិតជាចង់លុបប្រវត្តិប្រតិបត្តិការទាំងអស់ចេញពីសន្លឹក *ប្រវត្តិប្រតិបត្តិការ* និងស្ដារស្តុកឡើងវិញ?"
+          ),
+          { parse_mode: "Markdown", reply_markup: { inline_keyboard: rows } }
+        );
+      }
+
+      case "edtm_clearhist_do": {
+        const result = await equipmentService.clearTransactionHistory(true);
+        return bot.sendMessage(
+          chatId,
+          tr(
+            chatId,
+            `✅ *Transaction History Cleared!*\nCleared all transaction history across ${result.count} equipment item(s). The *ប្រវត្តិប្រតិបត្តិការ* sheet is now reset.`,
+            `✅ *បានលុបប្រវត្តិប្រតិបត្តិការរួចរាល់!*\nបានលុបប្រវត្តិប្រតិបត្តិការទាំងអស់លើ ${result.count} ឧបករណ៍។ សន្លឹក *ប្រវត្តិប្រតិបត្តិការ* ត្រូវបានស្ដារជាថ្មី។`
           ),
           { parse_mode: "Markdown" }
         );
