@@ -181,6 +181,69 @@ function parseEquipmentNames(item) {
   };
 }
 
+function groupActiveLoansByBorrower(items) {
+  const activeLoans = collectActiveLoans(items).filter(
+    (loan) => loan.remainingQuantity > 0
+  );
+
+  const map = new Map();
+
+  for (const loan of activeLoans) {
+    const rawBorrower = (loan.borrowerName || "Unknown").trim();
+    if (!rawBorrower) continue;
+
+    const key = rawBorrower.toLowerCase();
+    if (!map.has(key)) {
+      map.set(key, {
+        borrowerName: rawBorrower,
+        equipmentMap: new Map(),
+        totalQuantity: 0,
+        latestBorrowedAt: null,
+        reporters: new Set(),
+      });
+    }
+
+    const entry = map.get(key);
+
+    const eqName = (loan.equipmentName || "Unknown").trim();
+    const qty = loan.remainingQuantity;
+    const currentEqQty = entry.equipmentMap.get(eqName) || 0;
+    entry.equipmentMap.set(eqName, currentEqQty + qty);
+
+    entry.totalQuantity += qty;
+
+    const bDate = toDate(loan.borrowedAt);
+    if (bDate) {
+      if (!entry.latestBorrowedAt || bDate > entry.latestBorrowedAt) {
+        entry.latestBorrowedAt = bDate;
+      }
+    }
+
+    if (loan.reportedBy && loan.reportedBy.trim()) {
+      entry.reporters.add(loan.reportedBy.trim());
+    }
+  }
+
+  const rows = [];
+  for (const group of map.values()) {
+    const equipmentString = Array.from(group.equipmentMap.entries())
+      .map(([eqName, qty]) => `${eqName}(${qty})`)
+      .join(" + ");
+
+    rows.push({
+      borrowerName: group.borrowerName,
+      equipmentName: equipmentString,
+      remainingQuantity: group.totalQuantity,
+      borrowedAt: group.latestBorrowedAt,
+      reportedBy: Array.from(group.reporters).join(", "),
+    });
+  }
+
+  rows.sort((a, b) => (b.borrowedAt?.getTime() || 0) - (a.borrowedAt?.getTime() || 0));
+
+  return rows;
+}
+
 async function generateMasterReport() {
   const items = await getAll();
   const workbook = buildWorkbook("OSH Equipment Master Report");
@@ -227,21 +290,21 @@ async function generateMasterReport() {
   // Sheet 2: Active Borrowers
   const openLoansHeaders = [
     { header: "Borrower Name", key: "borrowerName", width: 26 },
-    { header: "Equipment Name", key: "equipmentName", width: 30 },
+    { header: "Equipment Name", key: "equipmentName", width: 45 },
     { header: "Borrowed Qty", key: "remainingQuantity", width: 14 },
     { header: "Borrowed At", key: "borrowedAt", width: 22 },
     { header: "Reported By", key: "reportedBy", width: 22 },
   ];
   const borrowersSheet = createSheet(workbook, "បញ្ជីអ្នកខ្ចីសកម្ម", openLoansHeaders);
 
-  const activeLoans = collectActiveLoans(items).sort((a, b) => (toDate(b.borrowedAt)?.getTime() || 0) - (toDate(a.borrowedAt)?.getTime() || 0));
-  activeLoans.forEach((loan) => {
+  const borrowerRows = groupActiveLoansByBorrower(items);
+  borrowerRows.forEach((row) => {
     borrowersSheet.addRow({
-      borrowerName: loan.borrowerName,
-      equipmentName: loan.equipmentName,
-      remainingQuantity: loan.remainingQuantity,
-      borrowedAt: formatTimestamp(loan.borrowedAt),
-      reportedBy: loan.reportedBy,
+      borrowerName: row.borrowerName,
+      equipmentName: row.equipmentName,
+      remainingQuantity: row.remainingQuantity,
+      borrowedAt: formatTimestamp(row.borrowedAt),
+      reportedBy: row.reportedBy,
     }).font = { name: "Arial", size: 10 };
   });
   styleTableBorders(borrowersSheet, borrowersSheet.rowCount, openLoansHeaders.length);
@@ -317,4 +380,6 @@ module.exports = {
   generateInventoryReport: generateMasterReport,
   generateBorrowerReport: generateMasterReport,
   generateStockHistoryReport: generateMasterReport,
+  groupActiveLoansByBorrower,
+  collectActiveLoans,
 };
