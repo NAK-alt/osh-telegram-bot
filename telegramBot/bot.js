@@ -2743,17 +2743,23 @@ bot.on("message", async (msg) => {
     if (session.flow === "edit_loan" && session.step === "qty") {
       const newQty = Number((msg.text || "").trim());
       if (Number.isNaN(newQty) || newQty < 0) {
-        return bot.sendMessage(chatId, tr(chatId, "Please enter a valid non-negative number.", "សូមបញ្ចូលចំនួនដែលត្រឹមត្រូវ។"));
+        return bot.sendMessage(chatId, tr(chatId, "Please enter a valid non-negative number.", "សូមបញ្ចូលចំនួនដែលត្រឹមត្រូវ (លេខមិនអវិជ្ជមាន)។"));
       }
       const { equipmentId, borrowerName, equipmentName } = session.data;
       const reporter = await resolveReporter(msg.from);
       clearSession(chatId);
       const res = await equipmentService.updateLoanQuantity(equipmentId, borrowerName, newQty, reporter);
+      if (res.error === "not_found") {
+        return bot.sendMessage(chatId, tr(chatId, `Equipment not found.`, `រកមិនឃើញឧបករណ៍ទេ។`));
+      }
+      if (res.error === "loan_not_found") {
+        return bot.sendMessage(chatId, tr(chatId, `Loan entry for ${borrowerName} was not found.`, `រកមិនឃើញកំណត់ត្រាខ្ចីសម្រាប់ ${borrowerName} ទេ។`));
+      }
       if (res.error === "insufficient") {
-        return bot.sendMessage(chatId, tr(chatId, `Not enough available stock to increase loan to ${newQty}.`, `មិនមានស្តុកសល់គ្រប់គ្រាន់សម្រាប់កើនឡើងដល់ ${newQty} ទេ។`));
+        return bot.sendMessage(chatId, tr(chatId, `Not enough available stock (${res.available} available) to increase loan to ${newQty}.`, `មិនមានស្តុកសល់គ្រប់គ្រាន់ (សល់ ${res.available}) សម្រាប់កើនឡើងដល់ ${newQty} ទេ។`));
       }
       if (res.error) {
-        return bot.sendMessage(chatId, tr(chatId, "Failed to update loan quantity.", "មិនអាចកែប្រែចំនួនខ្ចីបានទេ។"));
+        return bot.sendMessage(chatId, tr(chatId, `Failed to update loan quantity: ${res.error}`, `មិនអាចកែប្រែចំនួនខ្ចីបានទេ៖ ${res.error}`));
       }
       return bot.sendMessage(
         chatId,

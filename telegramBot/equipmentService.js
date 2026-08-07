@@ -868,7 +868,10 @@ async function addStock(equipmentId, qtyToAdd, reporter) {
  * Update quantity on an active loan for a borrower on a specific equipment item.
  */
 async function updateLoanQuantity(equipmentId, borrowerName, newQty, reporter) {
-  const item = await findById(equipmentId);
+  let item = await findById(equipmentId);
+  if (!item) {
+    item = await findByName(equipmentId);
+  }
   if (!item) return { error: "not_found" };
 
   const amount = Number(newQty);
@@ -876,7 +879,15 @@ async function updateLoanQuantity(equipmentId, borrowerName, newQty, reporter) {
 
   const target = normalizeBorrower(borrowerName);
   const activeLoans = getActiveLoans(item);
-  const loanIndex = activeLoans.findIndex((l) => normalizeBorrower(l.borrowerName) === target);
+  let loanIndex = activeLoans.findIndex((l) => normalizeBorrower(l.borrowerName) === target);
+
+  if (loanIndex < 0) {
+    loanIndex = activeLoans.findIndex(
+      (l) =>
+        normalizeBorrower(l.borrowerName).includes(target) ||
+        target.includes(normalizeBorrower(l.borrowerName))
+    );
+  }
 
   if (loanIndex < 0) return { error: "loan_not_found" };
 
@@ -888,8 +899,8 @@ async function updateLoanQuantity(equipmentId, borrowerName, newQty, reporter) {
     return { error: "insufficient", available: item.availableQuantity };
   }
 
-  const availableQuantity = item.availableQuantity - diff;
-  const borrowedQuantity = item.borrowedQuantity + diff;
+  const availableQuantity = Math.max(0, item.availableQuantity - diff);
+  const borrowedQuantity = Math.max(0, item.borrowedQuantity + diff);
   const status = computeStatus(availableQuantity, item.minimumStockLevel);
 
   if (amount === 0) {
@@ -900,7 +911,7 @@ async function updateLoanQuantity(equipmentId, borrowerName, newQty, reporter) {
       remainingQuantity: amount,
       quantity: amount,
       updatedAt: admin.firestore.Timestamp.now(),
-      reportedBy: String((reporter && reporter.name) || oldLoan.reportedBy).trim(),
+      reportedBy: String((reporter && reporter.name) || oldLoan.reportedBy || "").trim(),
     };
   }
 
