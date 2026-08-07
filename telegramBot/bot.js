@@ -315,6 +315,30 @@ function viewMenuKeyboard(chatId) {
   };
 }
 
+function formatEquipmentLabel(it) {
+  let kmName = String(it.equipmentNameKhmer || "").trim();
+  let enName = String(it.equipmentNameEnglish || "").trim();
+  const rawName = String(it.equipmentName || "").trim();
+
+  if (!kmName && !enName && rawName) {
+    const match = rawName.match(/^([^(]+)(?:\(([^)]+)\))?/);
+    if (match) {
+      kmName = match[1].trim();
+      enName = match[2] ? match[2].trim() : "";
+    } else {
+      kmName = rawName;
+    }
+  } else if (!kmName && rawName) {
+    kmName = rawName;
+  }
+
+  const modelStr = String(it.model || "").trim();
+  const qtyStr = `${it.availableQuantity ?? 0}/${it.totalQuantity ?? 0}`;
+
+  const parts = [kmName, enName, modelStr, qtyStr].filter(Boolean);
+  return parts.join(" ");
+}
+
 function stockKeyboard(chatId, items, page) {
   const totalPages = Math.max(1, Math.ceil(items.length / STOCK_PER_PAGE));
   const p = Math.min(Math.max(0, page), totalPages - 1);
@@ -322,7 +346,7 @@ function stockKeyboard(chatId, items, page) {
 
   const rows = slice.map((it) => [
     {
-      text: `${it.equipmentName} — ${it.availableQuantity}/${it.totalQuantity} ${it.status}`,
+      text: formatEquipmentLabel(it),
       callback_data: `view:${it.id}`,
     },
   ]);
@@ -340,7 +364,7 @@ function suggestKeyboard(items, action) {
   return {
     inline_keyboard: items.map((it) => [
       {
-        text: `${it.equipmentName} (${it.availableQuantity}/${it.totalQuantity})`,
+        text: formatEquipmentLabel(it),
         callback_data: `${action}:${it.id}`,
       },
     ]),
@@ -1056,7 +1080,7 @@ async function sendEquipmentPicker(chatId, prefix, page = 0, filterActiveOnly = 
 
   const rows = slice.map((it) => [
     {
-      text: `${it.equipmentName} (${it.availableQuantity}/${it.totalQuantity})`,
+      text: formatEquipmentLabel(it),
       callback_data: `${prefix}:${it.id}`,
     },
   ]);
