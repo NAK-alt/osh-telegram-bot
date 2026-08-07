@@ -2450,7 +2450,7 @@ bot.on("message", async (msg) => {
     // ---- borrow_multi flow ----
     if (session.flow === "borrow_multi") {
       if (session.step === "borrower") {
-        const inputName = msg.text.trim();
+        const inputName = (msg.text || "").trim();
         const matchedOfficers = await officerService.searchOfficers(inputName);
 
         if (matchedOfficers.length > 0) {
@@ -2503,7 +2503,7 @@ bot.on("message", async (msg) => {
       }
 
       if (session.step === "item_qty") {
-        const qty = Number(msg.text.trim());
+        const qty = Number((msg.text || "").trim());
         const item = session.data.currentItem;
         if (!item || Number.isNaN(qty) || qty <= 0) {
           return bot.sendMessage(chatId, tr(chatId, "Please enter a valid positive number for quantity.", "សូមបញ្ចូលចំនួនវិជ្ជមានដែលត្រឹមត្រូវ។"));
@@ -2530,7 +2530,7 @@ bot.on("message", async (msg) => {
     // ---- return_multi flow ----
     if (session.flow === "return_multi") {
       if (session.step === "item_qty") {
-        const qty = Number(msg.text.trim());
+        const qty = Number((msg.text || "").trim());
         const item = session.data.currentItem;
         if (!item || Number.isNaN(qty) || qty <= 0) {
           return bot.sendMessage(chatId, tr(chatId, "Please enter a valid positive number for quantity.", "សូមបញ្ចូលចំនួនវិជ្ជមានដែលត្រឹមត្រូវ។"));
@@ -2555,7 +2555,7 @@ bot.on("message", async (msg) => {
 
     // ---- return flow (button-driven) ----
     if (session.flow === "return" && session.step === "qty") {
-      const qty = Number(msg.text.trim());
+      const qty = Number((msg.text || "").trim());
       if (isNaN(qty) || qty <= 0) {
         return bot.sendMessage(chatId, tr(chatId, "Please send a valid number for quantity.", "សូមផ្ញើចំនួនដែលត្រឹមត្រូវ។"));
       }
@@ -2572,7 +2572,7 @@ bot.on("message", async (msg) => {
 
     // ---- edit flow (button-driven) ----
     if (session.flow === "edit" && session.step === "value") {
-      const value = msg.text.trim();
+      const value = (msg.text || "").trim();
       const { equipmentName, field } = session.data;
       const result = await equipmentService.editField(equipmentName, field, value);
       if (result.error === "not_found") {
@@ -2591,7 +2591,7 @@ bot.on("message", async (msg) => {
     // ---- add flow ----
     if (session.flow === "add") {
       if (session.step === "name" || session.step === "nameKhmer") {
-        session.data.nameKhmer = msg.text.trim();
+        session.data.nameKhmer = (msg.text || "").trim();
         session.step = "nameEnglish";
         setSession(chatId, session);
         return bot.sendMessage(
@@ -2606,7 +2606,7 @@ bot.on("message", async (msg) => {
 
       if (session.step === "nameEnglish") {
         if (msg.text && !msg.text.startsWith("/skip")) {
-          session.data.nameEnglish = msg.text.trim();
+          session.data.nameEnglish = (msg.text || "").trim();
         }
         session.step = "model";
         setSession(chatId, session);
@@ -2622,7 +2622,7 @@ bot.on("message", async (msg) => {
 
       if (session.step === "model") {
         if (msg.text && !msg.text.startsWith("/skip")) {
-          session.data.model = msg.text.trim();
+          session.data.model = (msg.text || "").trim();
         }
         session.step = "quantity";
         setSession(chatId, session);
@@ -2637,7 +2637,7 @@ bot.on("message", async (msg) => {
       }
 
       if (session.step === "quantity") {
-        const qty = Number(msg.text.trim());
+        const qty = Number((msg.text || "").trim());
         if (isNaN(qty) || qty < 0) {
           return bot.sendMessage(
             chatId,
@@ -2662,8 +2662,14 @@ bot.on("message", async (msg) => {
       }
 
       if (session.step === "photo") {
+        let fileId = null;
         if (msg.photo && msg.photo.length > 0) {
-          const fileId = msg.photo[msg.photo.length - 1].file_id; // largest size
+          fileId = msg.photo[msg.photo.length - 1].file_id; // largest size
+        } else if (msg.document && (msg.document.mime_type?.startsWith("image/") || /\.(jpg|jpeg|png|webp|heic)$/i.test(msg.document.file_name || ""))) {
+          fileId = msg.document.file_id;
+        }
+
+        if (fileId) {
           try {
             const buffer = await downloadTelegramFileAsBuffer(fileId);
             const { storagePath } = await storageService.uploadEquipmentImage(buffer, {
@@ -2684,13 +2690,13 @@ bot.on("message", async (msg) => {
           }
         }
 
-        return bot.sendMessage(chatId, tr(chatId, "Send a photo, or type /skip.", "ផ្ញើរូបភាព ឬវាយ /skip។"));
+        return bot.sendMessage(chatId, tr(chatId, "Send a photo, or type /skip.", "សូមផ្ញើរូបភាព ឬវាយ /skip។"));
       }
     }
 
     // ---- add_stock flow ----
     if (session.flow === "add_stock" && session.step === "qty") {
-      const qtyToAdd = Number(msg.text.trim());
+      const qtyToAdd = Number((msg.text || "").trim());
       if (Number.isNaN(qtyToAdd) || qtyToAdd <= 0) {
         return bot.sendMessage(chatId, tr(chatId, "Please enter a valid positive number for stock addition.", "សូមបញ្ចូលចំនួនវិជ្ជមានដែលត្រឹមត្រូវ។"));
       }
@@ -2715,7 +2721,7 @@ bot.on("message", async (msg) => {
 
     // ---- edit_borrower flow ----
     if (session.flow === "edit_borrower" && session.step === "rename") {
-      const newName = msg.text.trim();
+      const newName = (msg.text || "").trim();
       const { oldName } = session.data;
       if (!newName) {
         return bot.sendMessage(chatId, tr(chatId, "Borrower name cannot be empty.", "ឈ្មោះអ្នកខ្ចីមិនអាចទទេបានទេ។"));
@@ -2735,7 +2741,7 @@ bot.on("message", async (msg) => {
 
     // ---- edit_loan flow ----
     if (session.flow === "edit_loan" && session.step === "qty") {
-      const newQty = Number(msg.text.trim());
+      const newQty = Number((msg.text || "").trim());
       if (Number.isNaN(newQty) || newQty < 0) {
         return bot.sendMessage(chatId, tr(chatId, "Please enter a valid non-negative number.", "សូមបញ្ចូលចំនួនដែលត្រឹមត្រូវ។"));
       }
