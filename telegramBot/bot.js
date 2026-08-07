@@ -1784,8 +1784,13 @@ bot.on("callback_query", async (query) => {
           step: "value",
           data: { id: item.id, equipmentName: item.equipmentName, field },
         });
-        const label = (EDIT_FIELDS.find((f) => f.key === field) || {}).labelEn || field;
-        return bot.sendMessage(chatId, tr(chatId, `New value for ${label}?`, `តម្លៃថ្មីសម្រាប់ ${label}?`));
+        const fieldObj = EDIT_FIELDS.find((f) => f.key === field);
+        const isKm = lang(chatId) === "km";
+        const label = fieldObj ? (isKm ? fieldObj.labelKm : fieldObj.labelEn) : field;
+        return bot.sendMessage(
+          chatId,
+          tr(chatId, `Please enter new value for ${label}:`, `សូមបញ្ចូលព័ត៌មានថ្មីសម្រាប់ ${label}៖`)
+        );
       }
 
       case "del": {
