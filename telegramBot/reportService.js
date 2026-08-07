@@ -106,14 +106,24 @@ function collectBorrowEvents(items) {
   return items
     .flatMap((item) => {
       const history = (Array.isArray(item.borrowHistory) ? item.borrowHistory : []).filter(isVisibleEntry);
-      return history.map((entry) => ({
-        borrowerName: entry.borrowerName || "",
-        equipmentName: item.equipmentName || "",
-        quantity: Number(entry.quantity) || 0,
-        borrowedAt: entry.borrowedAt || null,
-        reportedBy: entry.reportedBy || "",
-        equipmentStatus: item.status || "",
-      }));
+      const activeLoans = (Array.isArray(item.activeLoans) ? item.activeLoans : []).filter(isVisibleEntry);
+      return history.map((entry) => {
+        const borrowerKey = (entry.borrowerName || "").trim().toLowerCase();
+        const hasActiveLoan = activeLoans.some(
+          (l) => (l.borrowerName || "").trim().toLowerCase() === borrowerKey && (Number(l.remainingQuantity ?? l.quantity) || 0) > 0
+        );
+
+        return {
+          borrowerName: entry.borrowerName || "",
+          equipmentName: item.equipmentName || "",
+          quantity: Number(entry.quantity) || 0,
+          borrowedAt: entry.borrowedAt || null,
+          isReturned: hasActiveLoan ? "No" : "Yes",
+          returnedAt: entry.returnedAt || null,
+          reportedBy: entry.reportedBy || "",
+          equipmentStatus: item.status || "",
+        };
+      });
     })
     .filter((entry) => entry.borrowerName || entry.equipmentName);
 }
@@ -126,6 +136,8 @@ function collectReturnEvents(items) {
         borrowerName: entry.borrowerName || "",
         equipmentName: item.equipmentName || "",
         quantity: Number(entry.quantity) || 0,
+        borrowedAt: entry.borrowedAt || null,
+        isReturned: "Yes",
         returnedAt: entry.returnedAt || null,
         reportedBy: entry.reportedBy || "",
       }));
@@ -351,14 +363,26 @@ async function generateMasterReport() {
     { header: "Borrower Name", key: "borrowerName", width: 24 },
     { header: "Type", key: "type", width: 12 },
     { header: "Quantity", key: "quantity", width: 12 },
-    { header: "At", key: "at", width: 22 },
+    { header: "Borrowed At", key: "borrowedAt", width: 22 },
+    { header: "Returned?", key: "isReturned", width: 14 },
+    { header: "Returned At", key: "returnedAt", width: 22 },
     { header: "Reported By", key: "reportedBy", width: 22 },
   ];
   const historySheet = createSheet(workbook, "ប្រវត្តិប្រតិបត្តិការ", historyHeaders);
 
-  const borrowEvents = collectBorrowEvents(items).map((e) => ({ ...e, type: "Borrow", at: e.borrowedAt }));
-  const returnEvents = collectReturnEvents(items).map((e) => ({ ...e, type: "Return", at: e.returnedAt }));
-  const allEvents = borrowEvents.concat(returnEvents).sort((a, b) => (toDate(b.at)?.getTime() || 0) - (toDate(a.at)?.getTime() || 0));
+  const borrowEvents = collectBorrowEvents(items).map((e) => ({
+    ...e,
+    type: "Borrow",
+    sortAt: e.borrowedAt,
+  }));
+  const returnEvents = collectReturnEvents(items).map((e) => ({
+    ...e,
+    type: "Return",
+    sortAt: e.returnedAt,
+  }));
+  const allEvents = borrowEvents
+    .concat(returnEvents)
+    .sort((a, b) => (toDate(b.sortAt)?.getTime() || 0) - (toDate(a.sortAt)?.getTime() || 0));
 
   allEvents.forEach((ev) => {
     historySheet.addRow({
@@ -366,7 +390,9 @@ async function generateMasterReport() {
       borrowerName: ev.borrowerName,
       type: ev.type,
       quantity: ev.quantity,
-      at: formatTimestamp(ev.at),
+      borrowedAt: formatTimestamp(ev.borrowedAt),
+      isReturned: ev.isReturned,
+      returnedAt: formatTimestamp(ev.returnedAt),
       reportedBy: ev.reportedBy,
     }).font = { name: "Arial", size: 10 };
   });
