@@ -464,8 +464,11 @@ async function finishAddFlow(chatId, session, imagePath) {
 
   const created = await equipmentService.createEquipment(session.data);
   clearSession(chatId);
-  const currentLang = lang(chatId);
-  return bot.sendMessage(chatId, `${tr(chatId, "Created!", "បានបង្កើតរួច!")}\n\n${formatItem(created)[currentLang]}`, { parse_mode: "HTML" });
+  await bot.sendMessage(
+    chatId,
+    tr(chatId, "✅ Added equipment successfully!", "✅ បានបន្ថែមឧបករណ៍ថ្មីដោយជោគជ័យ!")
+  );
+  return sendView(chatId, created);
 }
 
 // Shared return-result rendering (used by both /return command and the button flow).
@@ -1357,7 +1360,14 @@ bot.onText(/^\/report(?:@\w+)?$/i, async (msg) => {
 bot.onText(/^\/add$/, (msg) => {
   if (!isAuthorized(msg)) return reject(msg);
   setSession(msg.chat.id, { flow: "add", step: "name", data: {} });
-  bot.sendMessage(msg.chat.id, tr(msg.chat.id, "Adding new equipment to inventory. Please enter the equipment name:", "សូមបញ្ចូលឈ្មោះឧបករណ៍ថ្មីដែលត្រូវចុះបញ្ជីចូលក្នុងស្តុក៖"));
+  bot.sendMessage(
+    msg.chat.id,
+    tr(
+      msg.chat.id,
+      "Adding new equipment. Please enter Khmer Name:",
+      "សូមបញ្ចូលឈ្មោះ (ភាសាខ្មែរ)៖"
+    )
+  );
 });
 
 bot.onText(/^\/skip(?:@\w+)?$/i, async (msg) => {
@@ -2083,7 +2093,14 @@ bot.on("callback_query", async (query) => {
       }
       case "add": {
         setSession(chatId, { flow: "add", step: "name", data: {} });
-        return bot.sendMessage(chatId, tr(chatId, "Adding new equipment to inventory. Please enter the equipment name:", "សូមបញ្ចូលឈ្មោះឧបករណ៍ថ្មីដែលត្រូវចុះបញ្ជីចូលក្នុងស្តុក៖"));
+        return bot.sendMessage(
+          chatId,
+          tr(
+            chatId,
+            "Adding new equipment. Please enter Khmer Name:",
+            "សូមបញ្ចូលឈ្មោះ (ភាសាខ្មែរ)៖"
+          )
+        );
       }
 
       case "borm_pick_pg":
@@ -2406,7 +2423,14 @@ bot.on("message", async (msg) => {
   if (text.includes("Add") || text.includes("បញ្ចូល")) {
     clearSession(chatId);
     setSession(chatId, { flow: "add", step: "name", data: {} });
-    return bot.sendMessage(chatId, tr(chatId, "Adding new equipment to inventory. Please enter the equipment name:", "សូមបញ្ចូលឈ្មោះឧបករណ៍ថ្មីដែលត្រូវចុះបញ្ជីចូលក្នុងស្តុក៖"));
+    return bot.sendMessage(
+      chatId,
+      tr(
+        chatId,
+        "Adding new equipment. Please enter Khmer Name:",
+        "សូមបញ្ចូលឈ្មោះ (ភាសាខ្មែរ)៖"
+      )
+    );
   }
 
   if (text.includes("Reports") || text.includes("របាយការណ៍")) {
@@ -2574,8 +2598,8 @@ bot.on("message", async (msg) => {
           chatId,
           tr(
             chatId,
-            "Please enter the Equipment Name in English (or type /skip to skip):",
-            "សូមបញ្ចូលឈ្មោះឧបករណ៍ជាភាសាអង់គ្លេស (English Name) [ឬវាយ /skip ដើម្បីរំលង]៖"
+            "Please enter English Name (or type /skip to skip):",
+            "សូមបញ្ចូលឈ្មោះ (ភាសាអង់គ្លេស) [ឬវាយ /skip ដើម្បីរំលង]៖"
           )
         );
       }
@@ -2590,8 +2614,8 @@ bot.on("message", async (msg) => {
           chatId,
           tr(
             chatId,
-            "Please enter the Model number/name (or type /skip to skip):",
-            "សូមបញ្ចូលម៉ូឌែល/ជំនាន់ (Model) [ឬវាយ /skip ដើម្បីរំលង]៖"
+            "Please enter Model (or type /skip to skip):",
+            "សូមបញ្ចូលម៉ូឌែល / ជំនាន់ [ឬវាយ /skip ដើម្បីរំលង]៖"
           )
         );
       }
@@ -2606,8 +2630,8 @@ bot.on("message", async (msg) => {
           chatId,
           tr(
             chatId,
-            "Please enter the total quantity (number):",
-            "សូមបញ្ចូលចំនួនសរុបនៃឧបករណ៍ (ជាលេខ)៖"
+            "Please enter Total Quantity (number):",
+            "សូមបញ្ចូលបរិមាណសរុប (ស្តុក) (ជាលេខ)៖"
           )
         );
       }
