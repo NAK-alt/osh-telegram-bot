@@ -303,6 +303,33 @@ function recentBorrowers(item) {
   return result;
 }
 
+const borrowerKeyMap = new Map();
+let borrowerKeyCounter = 0;
+
+function setBorrowerKey(name) {
+  const str = String(name || "").trim();
+  if (!str) return "";
+  for (const [key, val] of borrowerKeyMap.entries()) {
+    if (val === str) return key;
+  }
+  borrowerKeyCounter = (borrowerKeyCounter + 1) % 10000;
+  const key = `b${borrowerKeyCounter}`;
+  borrowerKeyMap.set(key, str);
+  return key;
+}
+
+function getBorrowerByKey(key) {
+  const str = String(key || "").trim();
+  if (borrowerKeyMap.has(str)) {
+    return borrowerKeyMap.get(str);
+  }
+  try {
+    return decodeURIComponent(str);
+  } catch (_) {
+    return str;
+  }
+}
+
 // ---------- Inline keyboards ----------
 function viewMenuKeyboard(chatId) {
   return {
@@ -1245,7 +1272,7 @@ bot.onText(/^\/return(?:@\w+)?(?:\s+(.+))?$/i, async (msg, match) => {
   const rows = activeBorrowers.map((b) => [
     {
       text: `👤 ${b.borrowerName} (${b.itemCount} items, ${b.totalQuantity} units)`,
-      callback_data: `retm_borrower:${encodeURIComponent(b.borrowerName)}`,
+      callback_data: `retm_borrower:${setBorrowerKey(b.borrowerName)}`,
     },
   ]);
   rows.push([{ text: tr(chatId, "📦 Return items by picking equipment", "📦 ប្រគល់ដោយជ្រើសរើសឧបករណ៍"), callback_data: "retm_any_borrower" }]);
@@ -1651,7 +1678,7 @@ bot.on("callback_query", async (query) => {
       case "bor_select_idx": {
         let borrowerName = "";
         if ((id || "").startsWith("rec_")) {
-          borrowerName = decodeURIComponent(id.slice(4));
+          borrowerName = getBorrowerByKey(id.slice(4));
         } else {
           const idx = Number(id);
           const off = await officerService.getOfficerByIndex(idx);
@@ -1899,7 +1926,7 @@ bot.on("callback_query", async (query) => {
         const rows = activeBorrowers.map((b) => [
           {
             text: `👤 ${b.borrowerName} (${b.itemCount} items, ${b.totalQuantity} units)`,
-            callback_data: `edtb_pick:${encodeURIComponent(b.borrowerName)}`,
+            callback_data: `edtb_pick:${setBorrowerKey(b.borrowerName)}`,
           },
         ]);
         rows.push([{ text: t(chatId, "cancel"), callback_data: "borm_cancel" }]);
@@ -1911,16 +1938,16 @@ bot.on("callback_query", async (query) => {
       }
 
       case "edtb_pick": {
-        const borrowerName = decodeURIComponent(id || "");
+        const borrowerName = getBorrowerByKey(id || "");
         const rows = [
           [
-            { text: tr(chatId, "✏️ Rename Borrower", "✏️ ប្តូរឈ្មោះអ្នកខ្ចី"), callback_data: `edtb_ren:${encodeURIComponent(borrowerName)}` },
+            { text: tr(chatId, "✏️ Rename Borrower", "✏️ ប្តូរឈ្មោះអ្នកខ្ចី"), callback_data: `edtb_ren:${setBorrowerKey(borrowerName)}` },
           ],
           [
-            { text: tr(chatId, "🗑️ Delete Borrower Records", "🗑️ លុបទិន្នន័យអ្នកខ្ចី"), callback_data: `edtb_del:${encodeURIComponent(borrowerName)}` },
+            { text: tr(chatId, "🗑️ Delete Borrower Records", "🗑️ លុបទិន្នន័យអ្នកខ្ចី"), callback_data: `edtb_del:${setBorrowerKey(borrowerName)}` },
           ],
           [
-            { text: tr(chatId, "👁️ Hide from Reports", "👁️ លាក់ពីរបាយការណ៍"), callback_data: `edtb_hide:${encodeURIComponent(borrowerName)}` },
+            { text: tr(chatId, "👁️ Hide from Reports", "👁️ លាក់ពីរបាយការណ៍"), callback_data: `edtb_hide:${setBorrowerKey(borrowerName)}` },
           ],
           [{ text: t(chatId, "cancel"), callback_data: "borm_cancel" }],
         ];
@@ -1932,7 +1959,7 @@ bot.on("callback_query", async (query) => {
       }
 
       case "edtb_ren": {
-        const borrowerName = decodeURIComponent(id || "");
+        const borrowerName = getBorrowerByKey(id || "");
         setSession(chatId, { flow: "edit_borrower", step: "rename", data: { oldName: borrowerName } });
         return bot.sendMessage(
           chatId,
@@ -1946,7 +1973,7 @@ bot.on("callback_query", async (query) => {
       }
 
       case "edtb_del": {
-        const borrowerName = decodeURIComponent(id || "");
+        const borrowerName = getBorrowerByKey(id || "");
         const res = await equipmentService.deleteBorrowerGlobal(borrowerName);
         return bot.sendMessage(
           chatId,
@@ -1960,7 +1987,7 @@ bot.on("callback_query", async (query) => {
       }
 
       case "edtb_hide": {
-        const borrowerName = decodeURIComponent(id || "");
+        const borrowerName = getBorrowerByKey(id || "");
         const items = await equipmentService.getAll();
         for (const item of items) {
           await equipmentService.hideBorrowerFromReports(item.equipmentName, borrowerName);
@@ -1984,7 +2011,7 @@ bot.on("callback_query", async (query) => {
         const rows = activeBorrowers.map((b) => [
           {
             text: `👤 ${b.borrowerName} (${b.itemCount} items, ${b.totalQuantity} units)`,
-            callback_data: `edtl_bor:${encodeURIComponent(b.borrowerName)}`,
+            callback_data: `edtl_bor:${setBorrowerKey(b.borrowerName)}`,
           },
         ]);
         rows.push([{ text: t(chatId, "cancel"), callback_data: "borm_cancel" }]);
@@ -1996,7 +2023,7 @@ bot.on("callback_query", async (query) => {
       }
 
       case "edtl_bor": {
-        const borrowerName = decodeURIComponent(id || "");
+        const borrowerName = getBorrowerByKey(id || "");
         const loans = await equipmentService.getActiveLoansByBorrower(borrowerName);
         if (loans.length === 0) {
           return bot.sendMessage(chatId, tr(chatId, "No active loans found for this borrower.", "មិនមានការខ្ចីសកម្មសម្រាប់អ្នកខ្ចីនេះទេ។"));
@@ -2004,7 +2031,7 @@ bot.on("callback_query", async (query) => {
         const rows = loans.map((l) => [
           {
             text: `📦 ${l.equipmentName} (${l.openQuantity} units)`,
-            callback_data: `edtl_pick:${l.equipmentId}:${encodeURIComponent(borrowerName)}`,
+            callback_data: `edtl_pick:${l.equipmentId}:${setBorrowerKey(borrowerName)}`,
           },
         ]);
         rows.push([{ text: t(chatId, "cancel"), callback_data: "borm_cancel" }]);
@@ -2017,15 +2044,15 @@ bot.on("callback_query", async (query) => {
 
       case "edtl_pick": {
         const equipId = id;
-        const borrowerName = decodeURIComponent(rest[1] || "");
+        const borrowerName = getBorrowerByKey(rest[1] || "");
         const item = await equipmentService.findById(equipId);
         if (!item) return bot.sendMessage(chatId, t(chatId, "itemGone"));
         const rows = [
           [
-            { text: tr(chatId, "✏️ Edit Borrowed Qty", "✏️ កែប្រែចំនួនខ្ចី"), callback_data: `edtl_qty:${equipId}:${encodeURIComponent(borrowerName)}` },
+            { text: tr(chatId, "✏️ Edit Borrowed Qty", "✏️ កែប្រែចំនួនខ្ចី"), callback_data: `edtl_qty:${equipId}:${setBorrowerKey(borrowerName)}` },
           ],
           [
-            { text: tr(chatId, "🗑️ Cancel Loan Entry", "🗑️ បោះបង់ការខ្ចីនេះ"), callback_data: `edtl_del:${equipId}:${encodeURIComponent(borrowerName)}` },
+            { text: tr(chatId, "🗑️ Cancel Loan Entry", "🗑️ បោះបង់ការខ្ចីនេះ"), callback_data: `edtl_del:${equipId}:${setBorrowerKey(borrowerName)}` },
           ],
           [{ text: t(chatId, "cancel"), callback_data: "borm_cancel" }],
         ];
@@ -2038,7 +2065,7 @@ bot.on("callback_query", async (query) => {
 
       case "edtl_qty": {
         const equipId = id;
-        const borrowerName = decodeURIComponent(rest[1] || "");
+        const borrowerName = getBorrowerByKey(rest[1] || "");
         const item = await equipmentService.findById(equipId);
         if (!item) return bot.sendMessage(chatId, t(chatId, "itemGone"));
         setSession(chatId, { flow: "edit_loan", step: "qty", data: { equipmentId: equipId, borrowerName, equipmentName: item.equipmentName } });
@@ -2225,7 +2252,7 @@ bot.on("callback_query", async (query) => {
       }
 
       case "retm_borrower": {
-        const borrowerName = decodeURIComponent(id || "");
+        const borrowerName = getBorrowerByKey(id || "");
         const loans = await equipmentService.getActiveLoansByBorrower(borrowerName);
         if (loans.length === 0) {
           return bot.sendMessage(chatId, tr(chatId, `No active loans for ${borrowerName}.`, `មិនមានការខ្ចីសកម្មសម្រាប់ ${borrowerName} ទេ។`));
@@ -2238,13 +2265,13 @@ bot.on("callback_query", async (query) => {
           [
             {
               text: tr(chatId, `🔄 Return ALL (${totalQty} units)`, `🔄 ប្រគល់ទាំងអស់ (${totalQty} គ្រឿង)`),
-              callback_data: `retm_all_confirm:${encodeURIComponent(borrowerName)}`,
+              callback_data: `retm_all_confirm:${setBorrowerKey(borrowerName)}`,
             },
           ],
           [
             {
               text: tr(chatId, "📋 Pick specific items to return", "📋 ជ្រើសរើសឧបករណ៍ប្រគល់"),
-              callback_data: `retm_select:${encodeURIComponent(borrowerName)}`,
+              callback_data: `retm_select:${setBorrowerKey(borrowerName)}`,
             },
           ],
           [{ text: t(chatId, "cancel"), callback_data: "retm_cancel" }],
@@ -2262,7 +2289,7 @@ bot.on("callback_query", async (query) => {
       }
 
       case "retm_all_confirm": {
-        const borrowerName = decodeURIComponent(id || "");
+        const borrowerName = getBorrowerByKey(id || "");
         const loans = await equipmentService.getActiveLoansByBorrower(borrowerName);
         const totalQty = loans.reduce((sum, l) => sum + l.openQuantity, 0);
 
@@ -2270,7 +2297,7 @@ bot.on("callback_query", async (query) => {
           [
             {
               text: t(chatId, "confirm"),
-              callback_data: `retm_all_do:${encodeURIComponent(borrowerName)}`,
+              callback_data: `retm_all_do:${setBorrowerKey(borrowerName)}`,
             },
             { text: t(chatId, "cancel"), callback_data: "retm_cancel" },
           ],
@@ -2288,7 +2315,7 @@ bot.on("callback_query", async (query) => {
       }
 
       case "retm_all_do": {
-        const borrowerName = decodeURIComponent(id || "");
+        const borrowerName = getBorrowerByKey(id || "");
         const reporter = await resolveReporter(query.from);
         const result = await equipmentService.returnAllByBorrower(borrowerName, reporter);
         return sendMultiReturnResult(chatId, result, reporter ? reporter.name : "");
@@ -2296,7 +2323,7 @@ bot.on("callback_query", async (query) => {
 
       case "retm_select":
       case "retm_any_borrower": {
-        const borrowerName = action === "retm_select" ? decodeURIComponent(id || "") : "";
+        const borrowerName = action === "retm_select" ? getBorrowerByKey(id || "") : "";
         const reporter = await resolveReporter(query.from);
         setSession(chatId, {
           flow: "return_multi",
@@ -2396,7 +2423,7 @@ bot.on("message", async (msg) => {
     const rows = activeBorrowers.map((b) => [
       {
         text: `👤 ${b.borrowerName} (${b.itemCount} items, ${b.totalQuantity} units)`,
-        callback_data: `retm_borrower:${encodeURIComponent(b.borrowerName)}`,
+        callback_data: `retm_borrower:${setBorrowerKey(b.borrowerName)}`,
       },
     ]);
     rows.push([{ text: tr(chatId, "📦 Return items by picking equipment", "📦 ប្រគល់ដោយជ្រើសរើសឧបករណ៍"), callback_data: "retm_any_borrower" }]);
@@ -2463,7 +2490,7 @@ bot.on("message", async (msg) => {
           rows.push([
             {
               text: tr(chatId, `Use exact typed name: "${esc(inputName)}"`, `ប្រើឈ្មោះដែលបានវាយ៖ "${esc(inputName)}"`),
-              callback_data: `bor_select_idx:rec_${encodeURIComponent(inputName.slice(0, 30))}`,
+              callback_data: `bor_select_idx:rec_${setBorrowerKey(inputName)}`,
             },
           ]);
           rows.push([{ text: t(chatId, "cancel"), callback_data: "borm_cancel" }]);
