@@ -578,10 +578,6 @@ async function clearTransactionHistory(clearStockIn = true) {
   return { count };
 }
 
-  if (count > 0) await batch.commit();
-  return { clearedItems: count };
-}
-
 async function deleteEquipmentByName(equipmentName) {
   const item = await findByName(equipmentName);
   if (!item) return { error: "not_found" };
