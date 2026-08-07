@@ -552,6 +552,14 @@ async function clearTransactionHistory(clearStockIn = true) {
   let count = 0;
 
   for (const item of items) {
+    const hasHistory =
+      (Array.isArray(item.borrowHistory) && item.borrowHistory.length > 0) ||
+      (Array.isArray(item.returnHistory) && item.returnHistory.length > 0) ||
+      (Array.isArray(item.activeLoans) && item.activeLoans.length > 0) ||
+      (clearStockIn && Array.isArray(item.stockInHistory) && item.stockInHistory.length > 0);
+
+    if (!hasHistory) continue;
+
     const totalQuantity = Number(item.totalQuantity) || 0;
     const minimumStockLevel = Number(item.minimumStockLevel) || 0;
     const updateData = {
