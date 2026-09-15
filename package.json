@@ -10,7 +10,11 @@
     "backup": "node scripts/backup.js",
     "bot": "node telegramBot/bot.js",
     "bot:dev": "nodemon telegramBot/bot.js",
-    "migrate-images": "node scripts/migrateImagesToStorage.js"
+    "migrate-images": "node scripts/migrateImagesToStorage.js",
+    "pm2:start": "pm2 start ecosystem.config.js",
+    "pm2:stop": "pm2 stop ecosystem.config.js",
+    "pm2:restart": "pm2 restart ecosystem.config.js",
+    "pm2:logs": "pm2 logs osh-bot"
   },
   "dependencies": {
     "archiver": "^7.0.1",
