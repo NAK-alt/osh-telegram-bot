@@ -173,16 +173,69 @@ function sanitizeEquipment(d) {
   };
 }
 
+function extractEquipmentNames(item) {
+  let km = String(item.equipmentNameKhmer || "").trim();
+  let en = String(item.equipmentNameEnglish || "").trim();
+  const raw = String(item.equipmentName || "").trim();
+
+  if (!km && !en && raw) {
+    const match = raw.match(/^([^(]+)(?:\(([^)]+)\))?/);
+    if (match) {
+      km = match[1].trim();
+      en = match[2] ? match[2].trim() : "";
+    } else {
+      km = raw;
+    }
+  } else if (!km && raw) {
+    km = raw;
+  }
+  return { km, en, raw };
+}
+
 async function findByName(equipmentName) {
   const target = normalizeLookup(equipmentName);
   if (!target) return null;
 
   const items = await getAll();
-  return (
-    items.find((item) => normalizeLookup(item.equipmentName) === target) ||
-    items.find((item) => normalizeLookup(item.equipmentCode) === target) ||
-    null
-  );
+
+  // 1. Exact match on raw name, code, khmer name, english name
+  for (const item of items) {
+    const { km, en, raw } = extractEquipmentNames(item);
+    if (
+      normalizeLookup(raw) === target ||
+      normalizeLookup(item.equipmentCode) === target ||
+      (km && normalizeLookup(km) === target) ||
+      (en && normalizeLookup(en) === target)
+    ) {
+      return item;
+    }
+  }
+
+  // 2. Prefix match
+  for (const item of items) {
+    const { km, en, raw } = extractEquipmentNames(item);
+    if (
+      normalizeLookup(raw).startsWith(target) ||
+      (km && normalizeLookup(km).startsWith(target)) ||
+      (en && normalizeLookup(en).startsWith(target))
+    ) {
+      return item;
+    }
+  }
+
+  // 3. Contains match
+  for (const item of items) {
+    const { km, en, raw } = extractEquipmentNames(item);
+    if (
+      normalizeLookup(raw).includes(target) ||
+      (km && normalizeLookup(km).includes(target)) ||
+      (en && normalizeLookup(en).includes(target))
+    ) {
+      return item;
+    }
+  }
+
+  return null;
 }
 
 async function getAll() {
@@ -198,7 +251,7 @@ async function findById(id) {
 }
 
 // Fuzzy / partial name search. Used to suggest "Did you mean …?" when an
-// exact name/code match fails. Ranks exact > prefix > contains.
+// exact name/code match fails. Ranks exact > prefix > contains across Khmer & English.
 async function searchEquipment(query, limit = 8) {
   const target = normalizeLookup(query);
   if (!target) return [];
@@ -206,12 +259,16 @@ async function searchEquipment(query, limit = 8) {
   const items = await getAll();
   const scored = [];
   for (const item of items) {
-    const name = normalizeLookup(item.equipmentName);
+    const { km, en, raw } = extractEquipmentNames(item);
     const code = normalizeLookup(item.equipmentCode);
+    const nRaw = normalizeLookup(raw);
+    const nKm = normalizeLookup(km);
+    const nEn = normalizeLookup(en);
+
     let score = 0;
-    if (name === target || code === target) score = 100;
-    else if (name.startsWith(target) || code.startsWith(target)) score = 80;
-    else if (name.includes(target) || code.includes(target)) score = 60;
+    if (nRaw === target || nKm === target || nEn === target || code === target) score = 100;
+    else if (nRaw.startsWith(target) || nKm.startsWith(target) || nEn.startsWith(target) || code.startsWith(target)) score = 80;
+    else if (nRaw.includes(target) || nKm.includes(target) || nEn.includes(target) || code.includes(target)) score = 60;
     else continue;
     scored.push({ item, score });
   }

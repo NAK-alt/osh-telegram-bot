@@ -243,12 +243,20 @@ function escHtml(value) {
     .replace(/>/g, "&gt;");
 }
 
+const STATUS_KM_BOT = {
+  Available: "មានក្នុងស្តុក",
+  "Low Stock": "ជិតអស់ស្តុក",
+  "Out of Stock": "អស់ពីស្តុក",
+};
+
 function formatItem(item) {
-  const nameKhmer = item.equipmentNameKhmer || "";
-  const nameEnglish = item.equipmentNameEnglish || "";
+  const nameKhmer = (item.equipmentNameKhmer || "").trim();
+  const nameEnglish = (item.equipmentNameEnglish || "").trim();
   let nameDisplay = escHtml(item.equipmentName || "Equipment");
   if (nameKhmer && nameEnglish) {
     nameDisplay = `${escHtml(nameKhmer)} (${escHtml(nameEnglish)})`;
+  } else if (nameKhmer) {
+    nameDisplay = escHtml(nameKhmer);
   }
 
   const avail = Number.isNaN(Number(item.availableQuantity)) ? 0 : (Number(item.availableQuantity) || 0);
@@ -282,6 +290,8 @@ function formatItem(item) {
     borrowersKm += listKm;
   }
 
+  const statusKm = STATUS_KM_BOT[item.status] || item.status || "";
+
   return {
     en:
       `<b>${nameDisplay}</b>\n` +
@@ -293,7 +303,7 @@ function formatItem(item) {
       `<b>${nameDisplay}</b>\n` +
       (item.model ? `ម៉ូឌែល៖ ${escHtml(item.model)}\n` : "") +
       `សល់ក្នុងស្តុក៖ ${avail} / ${total}  |  ខ្ចីចេញ៖ ${borrowed}\n` +
-      `ស្ថានភាព៖ ${item.status}` +
+      `ស្ថានភាព៖ ${statusKm}` +
       borrowersKm,
   };
 }

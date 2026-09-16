@@ -119,6 +119,8 @@ function collectBorrowEvents(items) {
     .flatMap((item) => {
       const history = (Array.isArray(item.borrowHistory) ? item.borrowHistory : []).filter(isVisibleEntry);
       const activeLoans = (Array.isArray(item.activeLoans) ? item.activeLoans : []).filter(isVisibleEntry);
+      const names = parseEquipmentNames(item);
+      const eqName = names.khmer || item.equipmentName || "";
       return history.map((entry) => {
         const borrowerKey = (entry.borrowerName || "").trim().toLowerCase();
         const hasActiveLoan = activeLoans.some(
@@ -127,7 +129,7 @@ function collectBorrowEvents(items) {
 
         return {
           borrowerName: entry.borrowerName || "",
-          equipmentName: item.equipmentName || "",
+          equipmentName: eqName,
           quantity: Number(entry.quantity) || 0,
           borrowedAt: entry.borrowedAt || null,
           isReturned: hasActiveLoan ? "No" : "Yes",
@@ -144,9 +146,11 @@ function collectReturnEvents(items) {
   return items
     .flatMap((item) => {
       const history = (Array.isArray(item.returnHistory) ? item.returnHistory : []).filter(isVisibleEntry);
+      const names = parseEquipmentNames(item);
+      const eqName = names.khmer || item.equipmentName || "";
       return history.map((entry) => ({
         borrowerName: entry.borrowerName || "",
-        equipmentName: item.equipmentName || "",
+        equipmentName: eqName,
         quantity: Number(entry.quantity) || 0,
         borrowedAt: entry.borrowedAt || null,
         isReturned: "Yes",
@@ -161,9 +165,11 @@ function collectActiveLoans(items) {
   return items
     .flatMap((item) => {
       const loans = (Array.isArray(item.activeLoans) ? item.activeLoans : []).filter(isVisibleEntry);
+      const names = parseEquipmentNames(item);
+      const eqName = names.khmer || item.equipmentName || "";
       return loans.map((loan) => ({
         borrowerName: loan.borrowerName || "",
-        equipmentName: item.equipmentName || "",
+        equipmentName: eqName,
         quantity: Number(loan.quantity) || 0,
         remainingQuantity: Number(loan.remainingQuantity ?? loan.quantity) || 0,
         borrowedAt: loan.borrowedAt || null,
@@ -349,8 +355,10 @@ async function generateMasterReport() {
   const stockInEvents = items
     .flatMap((item) => {
       const history = Array.isArray(item.stockInHistory) ? item.stockInHistory : [];
+      const names = parseEquipmentNames(item);
+      const eqName = names.khmer || item.equipmentName || "";
       return history.map((e) => ({
-        equipmentName: item.equipmentName || "",
+        equipmentName: eqName,
         addedQty: e.addedQty || 0,
         oldTotal: e.oldTotal || 0,
         newTotal: e.newTotal || 0,
