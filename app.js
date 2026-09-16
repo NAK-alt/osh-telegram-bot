@@ -1,3 +1,4 @@
+process.env.TZ = process.env.TZ || "Asia/Phnom_Penh";
 require("dotenv").config();
 const express = require("express");
 const cors = require("cors");

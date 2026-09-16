@@ -1,3 +1,4 @@
+process.env.TZ = process.env.TZ || "Asia/Phnom_Penh";
 process.env.NTBA_FIX_350 = "1";
 require("dotenv").config();
 const TelegramBot = require("node-telegram-bot-api");
@@ -5,6 +6,8 @@ const path = require("path");
 const fs = require("fs");
 const https = require("https");
 const storageService = require("../services/storageService");
+
+const TIMEZONE = process.env.TIMEZONE || "Asia/Phnom_Penh";
 
 const { getSession, setSession, clearSession } = require("./sessionStore");
 const { getLanguage, setLanguage } = require("./languageStore");
@@ -297,10 +300,12 @@ function formatItem(item) {
 
 function formatTimestamp(value) {
   if (!value) return "Unknown date";
-  if (typeof value.toDate === "function") return value.toDate().toLocaleString();
-  if (value._seconds) return new Date(value._seconds * 1000).toLocaleString();
-  const parsed = new Date(value);
-  return Number.isNaN(parsed.getTime()) ? "Unknown date" : parsed.toLocaleString();
+  let date = null;
+  if (typeof value.toDate === "function") date = value.toDate();
+  else if (value._seconds) date = new Date(value._seconds * 1000);
+  else date = new Date(value);
+  if (!date || Number.isNaN(date.getTime())) return "Unknown date";
+  return date.toLocaleString("en-US", { timeZone: TIMEZONE });
 }
 
 function openQuantity(loan) {
@@ -1417,7 +1422,7 @@ async function sendReport(chatId) {
       )
     );
     const filePath = await generateMasterReport();
-    const dateStr = new Date().toLocaleString();
+    const dateStr = new Date().toLocaleString("en-US", { timeZone: TIMEZONE });
     await bot.sendDocument(chatId, filePath, {
       caption: tr(
         chatId,

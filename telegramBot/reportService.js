@@ -1,7 +1,10 @@
+process.env.TZ = process.env.TZ || "Asia/Phnom_Penh";
 const ExcelJS = require("exceljs");
 const path = require("path");
 const os = require("os");
 const { getAll } = require("./equipmentService");
+
+const TIMEZONE = process.env.TIMEZONE || "Asia/Phnom_Penh";
 
 const HEADERS = [
   { header: "ឈ្មោះឧបករណ៍", key: "equipmentName", width: 28 },
@@ -45,7 +48,7 @@ function toDate(value) {
 
 function formatTimestamp(value) {
   const date = toDate(value);
-  return date ? date.toLocaleString() : "";
+  return date ? date.toLocaleString("en-US", { timeZone: TIMEZONE }) : "";
 }
 
 function isVisibleEntry(entry) {
@@ -171,8 +174,10 @@ function collectActiveLoans(items) {
 }
 
 async function writeWorkbookToTemp(workbook, filePrefix) {
-  const timestamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
-  const tmpPath = path.join(os.tmpdir(), `${filePrefix}-${timestamp}.xlsx`);
+  const d = new Date();
+  const localDateStr = d.toLocaleDateString("en-CA", { timeZone: TIMEZONE });
+  const localTimeStr = d.toLocaleTimeString("en-GB", { timeZone: TIMEZONE }).replace(/:/g, "-");
+  const tmpPath = path.join(os.tmpdir(), `${filePrefix}-${localDateStr}-${localTimeStr}.xlsx`);
   await workbook.xlsx.writeFile(tmpPath);
   return tmpPath;
 }

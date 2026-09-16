@@ -1,5 +1,9 @@
 FROM node:20-alpine
 
+# Set timezone to Asia/Phnom_Penh (UTC+7)
+RUN apk add --no-cache tzdata
+ENV TZ=Asia/Phnom_Penh
+
 WORKDIR /app
 
 # Install dependencies first (layer caching)
