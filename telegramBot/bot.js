@@ -315,7 +315,18 @@ function formatTimestamp(value) {
   else if (value._seconds) date = new Date(value._seconds * 1000);
   else date = new Date(value);
   if (!date || Number.isNaN(date.getTime())) return "Unknown date";
-  return date.toLocaleString("en-US", { timeZone: TIMEZONE });
+  return date
+    .toLocaleString("en-GB", {
+      timeZone: TIMEZONE,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hour12: true,
+    })
+    .toUpperCase();
 }
 
 function openQuantity(loan) {
@@ -1432,7 +1443,18 @@ async function sendReport(chatId) {
       )
     );
     const filePath = await generateMasterReport();
-    const dateStr = new Date().toLocaleString("en-US", { timeZone: TIMEZONE });
+    const dateStr = new Date()
+      .toLocaleString("en-GB", {
+        timeZone: TIMEZONE,
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+        hour12: true,
+      })
+      .toUpperCase();
     await bot.sendDocument(chatId, filePath, {
       caption: tr(
         chatId,

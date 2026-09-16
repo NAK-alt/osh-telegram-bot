@@ -48,7 +48,19 @@ function toDate(value) {
 
 function formatTimestamp(value) {
   const date = toDate(value);
-  return date ? date.toLocaleString("en-US", { timeZone: TIMEZONE }) : "";
+  if (!date) return "";
+  return date
+    .toLocaleString("en-GB", {
+      timeZone: TIMEZONE,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hour12: true,
+    })
+    .toUpperCase();
 }
 
 function isVisibleEntry(entry) {
