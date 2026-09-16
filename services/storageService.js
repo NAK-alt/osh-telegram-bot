@@ -42,14 +42,32 @@ function ensureConfigured() {
 async function uploadEquipmentImage(buffer, { contentType } = {}) {
   ensureConfigured();
   return new Promise((resolve, reject) => {
+    const uploadOptions = {
+      folder: "equipment",
+      resource_type: "image",
+    };
+
+    // Auto-detect format unless a clean standard format is provided
+    if (contentType && contentType.startsWith("image/") && !contentType.includes("heic")) {
+      const sub = contentType.split("/")[1]?.toLowerCase();
+      if (sub && ["jpeg", "jpg", "png", "webp", "gif"].includes(sub)) {
+        uploadOptions.format = sub === "jpeg" ? "jpg" : sub;
+      }
+    }
+
     const stream = cloudinary.uploader.upload_stream(
-      {
-        folder: "equipment",
-        resource_type: "image",
-        ...(contentType ? { format: contentType.split("/")[1] } : {}),
-      },
+      uploadOptions,
       (err, result) => {
-        if (err) return reject(err);
+        if (err) {
+          const message =
+            err.message ||
+            err.error?.message ||
+            (typeof err === "object" ? JSON.stringify(err) : String(err));
+          return reject(new Error(message || "Cloudinary upload failed"));
+        }
+        if (!result || !result.public_id) {
+          return reject(new Error("Cloudinary did not return a valid public ID"));
+        }
         resolve({ storagePath: result.public_id });
       }
     );

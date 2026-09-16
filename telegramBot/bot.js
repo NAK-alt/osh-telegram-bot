@@ -492,13 +492,37 @@ async function suggestOrWarn(chatId, query, action) {
   });
 }
 
-// Download a Telegram photo by fileId into a Buffer (instead of to disk) so we can
-// hand the bytes straight to Firebase Storage. Uses https.get (Node-version
-// independent, no global-fetch assumption).
-function downloadTelegramFileAsBuffer(fileId) {
+// Download a Telegram photo by fileId into a Buffer. Uses global fetch (auto-redirect)
+// with fallback to bot.getFileStream.
+async function downloadTelegramFileAsBuffer(fileId) {
+  try {
+    const fileUrl = await bot.getFileLink(fileId);
+    if (typeof fetch === "function") {
+      const res = await fetch(fileUrl);
+      if (!res.ok) {
+        throw new Error(`Telegram file download failed (HTTP ${res.status})`);
+      }
+      const arrayBuf = await res.arrayBuffer();
+      return Buffer.from(arrayBuf);
+    }
+  } catch (err) {
+    console.warn("[downloadTelegramFileAsBuffer] fetch attempt failed:", err && err.message);
+  }
+
   return new Promise((resolve, reject) => {
     bot.getFileLink(fileId).then((fileUrl) => {
       https.get(fileUrl, (response) => {
+        if (response.statusCode === 301 || response.statusCode === 302 || response.statusCode === 307) {
+          const redirectUrl = response.headers.location;
+          if (redirectUrl) {
+            return https.get(redirectUrl, (r2) => {
+              const chunks = [];
+              r2.on("data", (c) => chunks.push(c));
+              r2.on("end", () => resolve(Buffer.concat(chunks)));
+              r2.on("error", reject);
+            }).on("error", reject);
+          }
+        }
         if (response.statusCode !== 200) {
           reject(new Error(`Telegram file download failed (HTTP ${response.statusCode})`));
           response.resume();
@@ -2981,28 +3005,58 @@ bot.on("message", async (msg) => {
 
       if (session.step === "photo") {
         let fileId = null;
+        let mimeType = "image/jpeg";
         if (msg.photo && msg.photo.length > 0) {
           fileId = msg.photo[msg.photo.length - 1].file_id; // largest size
-        } else if (msg.document && (msg.document.mime_type?.startsWith("image/") || /\.(jpg|jpeg|png|webp|heic)$/i.test(msg.document.file_name || ""))) {
+          mimeType = "image/jpeg";
+        } else if (
+          msg.document &&
+          (msg.document.mime_type?.startsWith("image/") ||
+            /\.(jpg|jpeg|png|webp|heic)$/i.test(msg.document.file_name || ""))
+        ) {
           fileId = msg.document.file_id;
+          mimeType = msg.document.mime_type || "image/jpeg";
         }
 
         if (fileId) {
+          let storagePath = null;
           try {
             const buffer = await downloadTelegramFileAsBuffer(fileId);
-            const { storagePath } = await storageService.uploadEquipmentImage(buffer, {
-              ext: ".jpg",
-              contentType: "image/jpeg",
+            const uploadResult = await storageService.uploadEquipmentImage(buffer, {
+              contentType: mimeType,
             });
-            return finishAddFlow(chatId, session, storagePath);
-          } catch (err) {
-            console.error("[TelegramBot] photo upload failed:", err);
+            storagePath = uploadResult.storagePath;
+          } catch (uploadErr) {
+            console.error("[TelegramBot] photo upload failed:", uploadErr);
+            const errorReason =
+              uploadErr?.message ||
+              uploadErr?.error?.message ||
+              (typeof uploadErr === "object" ? JSON.stringify(uploadErr) : String(uploadErr)) ||
+              "Upload failed";
             return bot.sendMessage(
               chatId,
               tr(
                 chatId,
-                `Could not save the photo: ${err.message}. Try /add again or /skip.`,
-                `មិនអាចរក្សារូបភាព៖ ${err.message}។ សាក /add ម្ដងទៀត ឬ /skip។`
+                `⚠️ Could not save the photo (${errorReason}). Please send another photo, or type /skip to add without a photo.`,
+                `⚠️ មិនអាចរក្សារូបភាពបានទេ (${errorReason})។ សូមផ្ញើរូបភាពម្ដងទៀត ឬវាយ /skip ដើម្បីរំលងការបញ្ចូលរូបភាព។`
+              )
+            );
+          }
+
+          try {
+            return await finishAddFlow(chatId, session, storagePath);
+          } catch (createErr) {
+            console.error("[TelegramBot] finishAddFlow failed:", createErr);
+            const errorReason =
+              createErr?.message ||
+              (typeof createErr === "object" ? JSON.stringify(createErr) : String(createErr)) ||
+              "Unknown error";
+            return bot.sendMessage(
+              chatId,
+              tr(
+                chatId,
+                `❌ Failed to save equipment: ${errorReason}. Please try /add again.`,
+                `❌ មិនអាចរក្សាទុកទិន្នន័យឧបករណ៍បានទេ៖ ${errorReason}។ សូមសាកល្បង /add ម្ដងទៀត។`
               )
             );
           }
