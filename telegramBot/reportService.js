@@ -4,25 +4,34 @@ const os = require("os");
 const { getAll } = require("./equipmentService");
 
 const HEADERS = [
-  { header: "Equipment Name", key: "equipmentName", width: 28 },
-  { header: "Brand", key: "brand", width: 16 },
-  { header: "Model", key: "model", width: 16 },
-  { header: "Serial Number", key: "serialNumber", width: 18 },
-  { header: "Storage Location", key: "storageLocation", width: 20 },
-  { header: "Total Qty", key: "totalQuantity", width: 12 },
-  { header: "Available Qty", key: "availableQuantity", width: 14 },
-  { header: "Borrowed Qty", key: "borrowedQuantity", width: 14 },
-  { header: "Last Borrowed By", key: "lastBorrowedBy", width: 20 },
-  { header: "Last Reported By", key: "lastReportedBy", width: 20 },
-  { header: "Min Stock Level", key: "minimumStockLevel", width: 15 },
-  { header: "Status", key: "status", width: 14 },
-  { header: "Description", key: "description", width: 30 },
+  { header: "ឈ្មោះឧបករណ៍", key: "equipmentName", width: 28 },
+  { header: "ម៉ាក", key: "brand", width: 16 },
+  { header: "ម៉ូឌែល", key: "model", width: 16 },
+  { header: "លេខសម្គាល់ / ស៊េរី", key: "serialNumber", width: 18 },
+  { header: "ទីតាំងផ្ទុក", key: "storageLocation", width: 20 },
+  { header: "ចំនួនសរុប", key: "totalQuantity", width: 12 },
+  { header: "ចំនួននៅសល់", key: "availableQuantity", width: 14 },
+  { header: "ចំនួនបានខ្ចី", key: "borrowedQuantity", width: 14 },
+  { header: "អ្នកខ្ចីចុងក្រោយ", key: "lastBorrowedBy", width: 20 },
+  { header: "អ្នកកត់ត្រាចុងក្រោយ", key: "lastReportedBy", width: 20 },
+  { header: "កម្រិតស្តុកអប្បបរមា", key: "minimumStockLevel", width: 18 },
+  { header: "ស្ថានភាព", key: "status", width: 14 },
+  { header: "ការពិពណ៌នា", key: "description", width: 30 },
 ];
 
 const STATUS_COLORS = {
   Available: "FFC6EFCE",
   "Low Stock": "FFFFEB9C",
   "Out of Stock": "FFFFC7CE",
+  "មានក្នុងស្តុក": "FFC6EFCE",
+  "ជិតអស់ស្តុក": "FFFFEB9C",
+  "អស់ពីស្តុក": "FFFFC7CE",
+};
+
+const STATUS_KM = {
+  Available: "មានក្នុងស្តុក",
+  "Low Stock": "ជិតអស់ស្តុក",
+  "Out of Stock": "អស់ពីស្តុក",
 };
 
 function toDate(value) {
@@ -77,7 +86,7 @@ function styleHeaderRow(row) {
     fgColor: { argb: "FF1F4E78" },
   };
   row.alignment = { vertical: "middle", horizontal: "center" };
-  row.height = 22;
+  row.height = 25;
 }
 
 function styleTableBorders(sheet, lastRow, lastCol) {
@@ -262,18 +271,19 @@ async function generateMasterReport() {
 
   // Sheet 1: Inventory
   const inventoryHeaders = [
-    { header: "Equipment Name (Khmer)", key: "nameKhmer", width: 30 },
-    { header: "Equipment Name (English)", key: "nameEnglish", width: 30 },
-    { header: "Model", key: "model", width: 18 },
-    { header: "Total Qty", key: "totalQuantity", width: 12 },
-    { header: "Available Qty", key: "availableQuantity", width: 14 },
-    { header: "Borrowed Qty", key: "borrowedQuantity", width: 14 },
-    { header: "Status", key: "status", width: 14 },
+    { header: "ឈ្មោះឧបករណ៍ (ខ្មែរ)", key: "nameKhmer", width: 32 },
+    { header: "ឈ្មោះឧបករណ៍ (អង់គ្លេស)", key: "nameEnglish", width: 32 },
+    { header: "ម៉ូឌែល", key: "model", width: 18 },
+    { header: "ចំនួនសរុប", key: "totalQuantity", width: 14 },
+    { header: "ចំនួននៅសល់", key: "availableQuantity", width: 14 },
+    { header: "ចំនួនបានខ្ចី", key: "borrowedQuantity", width: 14 },
+    { header: "ស្ថានភាព", key: "status", width: 16 },
   ];
   const invSheet = createSheet(workbook, "ស្តុកឧបករណ៍", inventoryHeaders);
 
   items.forEach((item) => {
     const names = parseEquipmentNames(item);
+    const statusKm = STATUS_KM[item.status] || item.status || "";
     const row = invSheet.addRow({
       nameKhmer: names.khmer,
       nameEnglish: names.english,
@@ -281,13 +291,13 @@ async function generateMasterReport() {
       totalQuantity: item.totalQuantity ?? 0,
       availableQuantity: item.availableQuantity ?? 0,
       borrowedQuantity: item.borrowedQuantity ?? 0,
-      status: item.status || "",
+      status: statusKm,
     });
 
     row.font = { name: "Arial", size: 10 };
     row.alignment = { vertical: "middle" };
 
-    const color = STATUS_COLORS[item.status];
+    const color = STATUS_COLORS[item.status] || STATUS_COLORS[statusKm];
     if (color) {
       row.getCell("status").fill = {
         type: "pattern",
@@ -301,11 +311,11 @@ async function generateMasterReport() {
 
   // Sheet 2: Active Borrowers
   const openLoansHeaders = [
-    { header: "Borrower Name", key: "borrowerName", width: 26 },
-    { header: "Equipment Name", key: "equipmentName", width: 45 },
-    { header: "Borrowed Qty", key: "remainingQuantity", width: 14 },
-    { header: "Borrowed At", key: "borrowedAt", width: 22 },
-    { header: "Reported By", key: "reportedBy", width: 22 },
+    { header: "ឈ្មោះអ្នកខ្ចី", key: "borrowerName", width: 28 },
+    { header: "ឈ្មោះឧបករណ៍", key: "equipmentName", width: 45 },
+    { header: "ចំនួនខ្ចី", key: "remainingQuantity", width: 14 },
+    { header: "កាលបរិច្ឆេទខ្ចី", key: "borrowedAt", width: 22 },
+    { header: "អ្នកកត់ត្រា", key: "reportedBy", width: 22 },
   ];
   const borrowersSheet = createSheet(workbook, "បញ្ជីអ្នកខ្ចីសកម្ម", openLoansHeaders);
 
@@ -323,12 +333,12 @@ async function generateMasterReport() {
 
   // Sheet 3: Stock In Log
   const stockInHeaders = [
-    { header: "Equipment Name", key: "equipmentName", width: 30 },
-    { header: "Added Qty", key: "addedQty", width: 14 },
-    { header: "Old Total", key: "oldTotal", width: 14 },
-    { header: "New Total", key: "newTotal", width: 14 },
-    { header: "Added At", key: "addedAt", width: 22 },
-    { header: "Added By", key: "addedBy", width: 22 },
+    { header: "ឈ្មោះឧបករណ៍", key: "equipmentName", width: 32 },
+    { header: "ចំនួនបន្ថែម", key: "addedQty", width: 14 },
+    { header: "ស្តុកចាស់សរុប", key: "oldTotal", width: 14 },
+    { header: "ស្តុកថ្មីសរុប", key: "newTotal", width: 14 },
+    { header: "កាលបរិច្ឆេទបន្ថែម", key: "addedAt", width: 22 },
+    { header: "អ្នកបន្ថែម", key: "addedBy", width: 22 },
   ];
   const stockInSheet = createSheet(workbook, "កំណត់ហេតុបន្ថែមស្តុក", stockInHeaders);
   const stockInEvents = items
@@ -359,25 +369,25 @@ async function generateMasterReport() {
 
   // Sheet 4: Transaction History
   const historyHeaders = [
-    { header: "Equipment Name", key: "equipmentName", width: 30 },
-    { header: "Borrower Name", key: "borrowerName", width: 24 },
-    { header: "Type", key: "type", width: 12 },
-    { header: "Quantity", key: "quantity", width: 12 },
-    { header: "Borrowed At", key: "borrowedAt", width: 22 },
-    { header: "Returned?", key: "isReturned", width: 14 },
-    { header: "Returned At", key: "returnedAt", width: 22 },
-    { header: "Reported By", key: "reportedBy", width: 22 },
+    { header: "ឈ្មោះឧបករណ៍", key: "equipmentName", width: 32 },
+    { header: "ឈ្មោះអ្នកខ្ចី", key: "borrowerName", width: 26 },
+    { header: "ប្រភេទប្រតិបត្តិការ", key: "type", width: 18 },
+    { header: "ចំនួន", key: "quantity", width: 12 },
+    { header: "កាលបរិច្ឆេទខ្ចី", key: "borrowedAt", width: 22 },
+    { header: "ស្ថានភាពប្រគល់", key: "isReturned", width: 16 },
+    { header: "កាលបរិច្ឆេទប្រគល់", key: "returnedAt", width: 22 },
+    { header: "អ្នកកត់ត្រា", key: "reportedBy", width: 22 },
   ];
   const historySheet = createSheet(workbook, "ប្រវត្តិប្រតិបត្តិការ", historyHeaders);
 
   const borrowEvents = collectBorrowEvents(items).map((e) => ({
     ...e,
-    type: "Borrow",
+    type: "ខ្ចី",
     sortAt: e.borrowedAt,
   }));
   const returnEvents = collectReturnEvents(items).map((e) => ({
     ...e,
-    type: "Return",
+    type: "ប្រគល់",
     sortAt: e.returnedAt,
   }));
   const allEvents = borrowEvents
@@ -385,13 +395,14 @@ async function generateMasterReport() {
     .sort((a, b) => (toDate(b.sortAt)?.getTime() || 0) - (toDate(a.sortAt)?.getTime() || 0));
 
   allEvents.forEach((ev) => {
+    const isRetStr = ev.isReturned === "Yes" ? "បានប្រគល់" : ev.isReturned === "No" ? "មិនទាន់ប្រគល់" : ev.isReturned || "";
     historySheet.addRow({
       equipmentName: ev.equipmentName,
       borrowerName: ev.borrowerName,
       type: ev.type,
       quantity: ev.quantity,
       borrowedAt: formatTimestamp(ev.borrowedAt),
-      isReturned: ev.isReturned,
+      isReturned: isRetStr,
       returnedAt: formatTimestamp(ev.returnedAt),
       reportedBy: ev.reportedBy,
     }).font = { name: "Arial", size: 10 };
