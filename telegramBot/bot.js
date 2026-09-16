@@ -697,6 +697,24 @@ bot.onText(/^\/language(?:@\w+)?(?:\s+(en|km))?$/i, (msg, match) => {
   return bot.sendMessage(chatId, setChatLanguage(chatId, choice));
 });
 
+bot.onText(/^\/(?:version|status)(?:@\w+)?$/i, (msg) => {
+  if (!isAuthorized(msg)) return reject(msg);
+  const chatId = msg.chat.id;
+  const now = new Date();
+  const timeStr = formatTimestamp(now);
+  const tz = process.env.TZ || TIMEZONE || "Asia/Phnom_Penh";
+  return bot.sendMessage(
+    chatId,
+    `🤖 *OSH Equipment Bot — System Info*\n\n` +
+    `• *Version:* 2.1 (dd/mm/yyyy & Asia/Phnom_Penh)\n` +
+    `• *Timezone:* \`${tz}\`\n` +
+    `• *Current Bot Time:* \`${timeStr}\`\n` +
+    `• *Date Format:* \`dd/mm/yyyy\`\n` +
+    `• *Khmer Localization:* Active`,
+    { parse_mode: "Markdown" }
+  );
+});
+
 bot.onText(/\/help/, (msg) => {
   if (!isAuthorized(msg)) return reject(msg);
   sendHelp(msg.chat.id);
