@@ -6,3 +6,6 @@ uploads/equipment/*
 uploads/qr-codes/*
 !uploads/qr-codes/.gitkeep
 backups/*
+.vercel
+
+.vercel

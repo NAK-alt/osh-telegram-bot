@@ -1420,6 +1420,30 @@ bot.onText(/^\/report(?:@\w+)?$/i, async (msg) => {
   await sendReport(msg.chat.id);
 });
 
+// ---------- /resetstock or /reset ----------
+bot.onText(/^\/(?:resetstock|reset)(?:@\w+)?$/i, async (msg) => {
+  if (!isAuthorized(msg)) return reject(msg);
+  const chatId = msg.chat.id;
+  const rows = [
+    [
+      {
+        text: tr(chatId, "⚠️ Yes, Clear History & Reset Stock", "⚠️ ពិតជាចង់លុបប្រវត្តិ និងស្ដារស្តុក"),
+        callback_data: "edtm_clearhist_do",
+      },
+      { text: t(chatId, "cancel"), callback_data: "borm_cancel" },
+    ],
+  ];
+  return bot.sendMessage(
+    chatId,
+    tr(
+      chatId,
+      "⚠️ *Reset Stock & Clear History*\nAre you sure you want to reset all equipment stock back to full and clear *ប្រវត្តិប្រតិបត្តិការ* (Transaction History) and *បញ្ជីអ្នកខ្ចីសកម្ម* (Active Borrowers)?",
+      "⚠️ *ស្ដារស្តុកពេញឡើងវិញ និងលុបប្រវត្តិប្រតិបត្តិការ*\nតើអ្នកពិតជាចង់ស្ដារស្តុកឧបករណ៍ទាំងអស់ឱ្យពេញវិញ និងលុបប្រវត្តិប្រតិបត្តិការ (*ប្រវត្តិប្រតិបត្តិការ*) ព្រមទាំងបញ្ជីអ្នកខ្ចីសកម្ម (*បញ្ជីអ្នកខ្ចីសកម្ម*) មែនទេ?"
+    ),
+    { parse_mode: "Markdown", reply_markup: { inline_keyboard: rows } }
+  );
+});
+
 // ---------- /add ----------
 bot.onText(/^\/add$/, (msg) => {
   if (!isAuthorized(msg)) return reject(msg);
@@ -2183,8 +2207,8 @@ bot.on("callback_query", async (query) => {
           chatId,
           tr(
             chatId,
-            `✅ *Transaction History Cleared!*\nCleared all transaction history across ${result.count} equipment item(s). The *ប្រវត្តិប្រតិបត្តិការ* sheet is now reset.`,
-            `✅ *បានលុបប្រវត្តិប្រតិបត្តិការរួចរាល់!*\nបានលុបប្រវត្តិប្រតិបត្តិការទាំងអស់លើ ${result.count} ឧបករណ៍។ សន្លឹក *ប្រវត្តិប្រតិបត្តិការ* ត្រូវបានស្ដារជាថ្មី។`
+            `✅ *Stock Reset & History Cleared!*\nStock restored to full across all items and cleared all history/active loans (${result.count} equipment item(s) updated). The *ស្តុកឧបករណ៍*, *ប្រវត្តិប្រតិបត្តិការ*, and *បញ្ជីអ្នកខ្ចីសកម្ម* sheets are now reset.`,
+            `✅ *បានស្ដារស្តុកពេញ និងលុបប្រវត្តិរួចរាល់!*\nស្តុកឧបករណ៍ទាំងអស់ត្រូវបានស្ដារមកពេញវិញ និងបានលុបប្រវត្តិប្រតិបត្តិការព្រមទាំងបញ្ជីអ្នកខ្ចីសកម្ម (បានកែប្រែ ${result.count} ឧបករណ៍)។ សន្លឹក *ស្តុកឧបករណ៍*, *ប្រវត្តិប្រតិបត្តិការ* និង *បញ្ជីអ្នកខ្ចីសកម្ម* ត្រូវបានស្ដារជាថ្មី។`
           ),
           { parse_mode: "Markdown" }
         );

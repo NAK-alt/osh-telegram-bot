@@ -542,47 +542,58 @@ async function clearAllBorrowHistory() {
   return clearTransactionHistory(false);
 }
 
-/**
- * Wipe borrow history, return history, active loans, and stock-in history for all equipment items.
- * Destructive — cannot be undone.
- */
 async function clearTransactionHistory(clearStockIn = true) {
   const items = await getAll();
-  const batch = db.batch();
   let count = 0;
+  const CHUNK_SIZE = 400;
 
-  for (const item of items) {
-    const hasHistory =
-      (Array.isArray(item.borrowHistory) && item.borrowHistory.length > 0) ||
-      (Array.isArray(item.returnHistory) && item.returnHistory.length > 0) ||
-      (Array.isArray(item.activeLoans) && item.activeLoans.length > 0) ||
-      (clearStockIn && Array.isArray(item.stockInHistory) && item.stockInHistory.length > 0);
+  for (let i = 0; i < items.length; i += CHUNK_SIZE) {
+    const chunk = items.slice(i, i + CHUNK_SIZE);
+    const batch = db.batch();
+    let batchCount = 0;
 
-    if (!hasHistory) continue;
+    for (const item of chunk) {
+      const totalQuantity = Number(item.totalQuantity) || 0;
+      const minimumStockLevel = Number(item.minimumStockLevel) || 0;
+      const hasHistory =
+        (Array.isArray(item.borrowHistory) && item.borrowHistory.length > 0) ||
+        (Array.isArray(item.returnHistory) && item.returnHistory.length > 0) ||
+        (Array.isArray(item.activeLoans) && item.activeLoans.length > 0) ||
+        (clearStockIn && Array.isArray(item.stockInHistory) && item.stockInHistory.length > 0);
 
-    const totalQuantity = Number(item.totalQuantity) || 0;
-    const minimumStockLevel = Number(item.minimumStockLevel) || 0;
-    const updateData = {
-      borrowHistory: [],
-      returnHistory: [],
-      activeLoans: [],
-      borrowedQuantity: 0,
-      availableQuantity: totalQuantity,
-      lastBorrowedBy: "",
-      lastBorrowedAt: null,
-      status: computeStatus(totalQuantity, minimumStockLevel),
-      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-    };
-    if (clearStockIn) {
-      updateData.stockInHistory = [];
+      const stockNeedsReset =
+        item.availableQuantity !== totalQuantity ||
+        item.borrowedQuantity !== 0 ||
+        Boolean(item.lastBorrowedBy) ||
+        Boolean(item.lastBorrowedAt) ||
+        item.status !== computeStatus(totalQuantity, minimumStockLevel);
+
+      if (!hasHistory && !stockNeedsReset) continue;
+
+      const updateData = {
+        borrowHistory: [],
+        returnHistory: [],
+        activeLoans: [],
+        borrowedQuantity: 0,
+        availableQuantity: totalQuantity,
+        lastBorrowedBy: "",
+        lastBorrowedAt: null,
+        status: computeStatus(totalQuantity, minimumStockLevel),
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      };
+      if (clearStockIn) {
+        updateData.stockInHistory = [];
+      }
+      batch.update(db.collection(COLLECTION).doc(item.id), updateData);
+      batchCount++;
+      count++;
     }
-    batch.update(db.collection(COLLECTION).doc(item.id), updateData);
-    count++;
+
+    if (batchCount > 0) {
+      await batch.commit();
+    }
   }
 
-  if (count > 0) {
-    await batch.commit();
-  }
   return { count };
 }
 
