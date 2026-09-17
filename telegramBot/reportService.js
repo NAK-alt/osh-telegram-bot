@@ -31,12 +31,6 @@ const PALETTE = {
   statusOutOfStockBg: "FFF8D7DA",
   statusOutOfStockText: "FF842029",
 
-  // Sheet 4 operation pill colors
-  opBorrowBg: "FFE0F2FE",
-  opBorrowText: "FF0369A1",
-  opReturnBg: "FFDCFCE7",
-  opReturnText: "FF15803D",
-
   // Sheet 4 return status pill colors
   returnedBg: "FFD1E7DD",
   returnedText: "FF0F5132",
@@ -170,16 +164,6 @@ function applyStatusBadge(cell, status) {
   }
 }
 
-function applyOperationBadge(cell, type) {
-  if (type === "ខ្ចី") {
-    cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: PALETTE.opBorrowBg } };
-    cell.font = { name: "Segoe UI", size: 10, bold: true, color: { argb: PALETTE.opBorrowText } };
-  } else if (type === "ប្រគល់") {
-    cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: PALETTE.opReturnBg } };
-    cell.font = { name: "Segoe UI", size: 10, bold: true, color: { argb: PALETTE.opReturnText } };
-  }
-}
-
 function applyReturnStatusBadge(cell, status) {
   if (status === "បានប្រគល់") {
     cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: PALETTE.returnedBg } };
@@ -193,80 +177,6 @@ function applyReturnStatusBadge(cell, status) {
 function applyAutoFilter(sheet, headersConfig) {
   const lastColLetter = sheet.getColumn(headersConfig.length).letter;
   sheet.autoFilter = { from: "A1", to: `${lastColLetter}1` };
-}
-
-function collectBorrowEvents(items) {
-  return items
-    .flatMap((item) => {
-      const history = (Array.isArray(item.borrowHistory) ? item.borrowHistory : []).filter(isVisibleEntry);
-      const activeLoans = (Array.isArray(item.activeLoans) ? item.activeLoans : []).filter(isVisibleEntry);
-      const names = parseEquipmentNames(item);
-      const eqName = names.khmer || item.equipmentName || "";
-      return history.map((entry) => {
-        const borrowerKey = (entry.borrowerName || "").trim().toLowerCase();
-        const hasActiveLoan = activeLoans.some(
-          (l) => (l.borrowerName || "").trim().toLowerCase() === borrowerKey && (Number(l.remainingQuantity ?? l.quantity) || 0) > 0
-        );
-
-        return {
-          borrowerName: entry.borrowerName || "",
-          equipmentName: eqName,
-          quantity: Number(entry.quantity) || 0,
-          borrowedAt: entry.borrowedAt || null,
-          isReturned: hasActiveLoan ? "No" : "Yes",
-          returnedAt: entry.returnedAt || null,
-          reportedBy: entry.reportedBy || "",
-          equipmentStatus: item.status || "",
-        };
-      });
-    })
-    .filter((entry) => entry.borrowerName || entry.equipmentName);
-}
-
-function collectReturnEvents(items) {
-  return items
-    .flatMap((item) => {
-      const history = (Array.isArray(item.returnHistory) ? item.returnHistory : []).filter(isVisibleEntry);
-      const names = parseEquipmentNames(item);
-      const eqName = names.khmer || item.equipmentName || "";
-      return history.map((entry) => ({
-        borrowerName: entry.borrowerName || "",
-        equipmentName: eqName,
-        quantity: Number(entry.quantity) || 0,
-        borrowedAt: entry.borrowedAt || null,
-        isReturned: "Yes",
-        returnedAt: entry.returnedAt || null,
-        reportedBy: entry.reportedBy || "",
-      }));
-    })
-    .filter((entry) => entry.borrowerName || entry.equipmentName);
-}
-
-function collectActiveLoans(items) {
-  return items
-    .flatMap((item) => {
-      const loans = (Array.isArray(item.activeLoans) ? item.activeLoans : []).filter(isVisibleEntry);
-      const names = parseEquipmentNames(item);
-      const eqName = names.khmer || item.equipmentName || "";
-      return loans.map((loan) => ({
-        borrowerName: loan.borrowerName || "",
-        equipmentName: eqName,
-        quantity: Number(loan.quantity) || 0,
-        remainingQuantity: Number(loan.remainingQuantity ?? loan.quantity) || 0,
-        borrowedAt: loan.borrowedAt || null,
-        reportedBy: loan.reportedBy || "",
-      }));
-    })
-    .filter((entry) => entry.borrowerName || entry.equipmentName);
-}
-
-async function writeWorkbookToTemp(workbook, filePrefix) {
-  const d = new Date();
-  const localDateStr = d.toLocaleDateString("en-CA", { timeZone: TIMEZONE });
-  const localTimeStr = d.toLocaleTimeString("en-GB", { timeZone: TIMEZONE }).replace(/:/g, "-");
-  const tmpPath = path.join(os.tmpdir(), `${filePrefix}-${localDateStr}-${localTimeStr}.xlsx`);
-  await workbook.xlsx.writeFile(tmpPath);
-  return tmpPath;
 }
 
 function parseEquipmentNames(item) {
@@ -287,6 +197,24 @@ function parseEquipmentNames(item) {
     khmer: item.equipmentName || "",
     english: "",
   };
+}
+
+function collectActiveLoans(items) {
+  return items
+    .flatMap((item) => {
+      const loans = (Array.isArray(item.activeLoans) ? item.activeLoans : []).filter(isVisibleEntry);
+      const names = parseEquipmentNames(item);
+      const eqName = names.khmer || item.equipmentName || "";
+      return loans.map((loan) => ({
+        borrowerName: loan.borrowerName || "",
+        equipmentName: eqName,
+        quantity: Number(loan.quantity) || 0,
+        remainingQuantity: Number(loan.remainingQuantity ?? loan.quantity) || 0,
+        borrowedAt: loan.borrowedAt || null,
+        reportedBy: loan.reportedBy || "",
+      }));
+    })
+    .filter((entry) => entry.borrowerName || entry.equipmentName);
 }
 
 function groupActiveLoansByBorrower(items) {
@@ -350,6 +278,122 @@ function groupActiveLoansByBorrower(items) {
   rows.sort((a, b) => (b.borrowedAt?.getTime() || 0) - (a.borrowedAt?.getTime() || 0));
 
   return rows;
+}
+
+/**
+ * Merges borrow and return events into unified, single-row loan records.
+ * Returns do NOT generate redundant separate rows; instead, their return
+ * date and return status are merged directly into the original loan row.
+ */
+function collectTransactionHistory(items) {
+  const allRows = [];
+
+  items.forEach((item) => {
+    const names = parseEquipmentNames(item);
+    const eqName = names.khmer || item.equipmentName || "";
+
+    const borrowHistory = (Array.isArray(item.borrowHistory) ? item.borrowHistory : [])
+      .filter(isVisibleEntry);
+    const returnHistory = (Array.isArray(item.returnHistory) ? item.returnHistory : [])
+      .filter(isVisibleEntry);
+    const activeLoans = (Array.isArray(item.activeLoans) ? item.activeLoans : [])
+      .filter(isVisibleEntry);
+
+    // Group returns by normalized borrower
+    const returnsByBorrower = new Map();
+    for (const ret of returnHistory) {
+      const bKey = (ret.borrowerName || "").trim().toLowerCase();
+      if (!returnsByBorrower.has(bKey)) returnsByBorrower.set(bKey, []);
+      returnsByBorrower.get(bKey).push({
+        returnedAt: toDate(ret.returnedAt),
+        quantity: Number(ret.quantity) || 0,
+        reportedBy: ret.reportedBy || "",
+        usedQty: 0,
+      });
+    }
+
+    // Sort returns ascending by date for chronological FIFO matching
+    for (const list of returnsByBorrower.values()) {
+      list.sort((a, b) => (a.returnedAt?.getTime() || 0) - (b.returnedAt?.getTime() || 0));
+    }
+
+    // Map active open loans per borrower
+    const activeLoanMap = new Map();
+    for (const loan of activeLoans) {
+      const bKey = (loan.borrowerName || "").trim().toLowerCase();
+      const remaining = Number(loan.remainingQuantity ?? loan.quantity) || 0;
+      activeLoanMap.set(bKey, (activeLoanMap.get(bKey) || 0) + remaining);
+    }
+
+    // Sort borrow records ascending by date for chronological matching
+    const sortedBorrows = borrowHistory
+      .map((b) => ({
+        borrowerName: b.borrowerName || "",
+        quantity: Number(b.quantity) || 0,
+        borrowedAt: toDate(b.borrowedAt),
+        reportedBy: b.reportedBy || "",
+      }))
+      .sort((a, b) => (a.borrowedAt?.getTime() || 0) - (b.borrowedAt?.getTime() || 0));
+
+    // Match each borrow with corresponding returns
+    for (const b of sortedBorrows) {
+      const bKey = (b.borrowerName || "").trim().toLowerCase();
+      const returnList = returnsByBorrower.get(bKey) || [];
+
+      let remainingQty = b.quantity;
+
+      for (const ret of returnList) {
+        const available = ret.quantity - ret.usedQty;
+        if (available > 0 && remainingQty > 0) {
+          const matched = Math.min(remainingQty, available);
+          ret.usedQty += matched;
+          remainingQty -= matched;
+
+          allRows.push({
+            equipmentName: eqName,
+            borrowerName: b.borrowerName,
+            quantity: matched,
+            borrowedAt: b.borrowedAt,
+            isReturned: "បានប្រគល់",
+            returnedAt: ret.returnedAt,
+            reportedBy: ret.reportedBy || b.reportedBy,
+            sortDate: ret.returnedAt || b.borrowedAt,
+          });
+        }
+      }
+
+      // If portion of units remain unreturned
+      if (remainingQty > 0) {
+        const remainingActive = activeLoanMap.get(bKey) || 0;
+        const isActuallyReturned = remainingActive <= 0 && returnList.length > 0;
+        const fallbackRetAt = isActuallyReturned ? returnList[returnList.length - 1].returnedAt : null;
+
+        allRows.push({
+          equipmentName: eqName,
+          borrowerName: b.borrowerName,
+          quantity: remainingQty,
+          borrowedAt: b.borrowedAt,
+          isReturned: isActuallyReturned ? "បានប្រគល់" : "មិនទាន់ប្រគល់",
+          returnedAt: fallbackRetAt,
+          reportedBy: b.reportedBy,
+          sortDate: fallbackRetAt || b.borrowedAt,
+        });
+      }
+    }
+  });
+
+  // Sort descending by most recent activity
+  allRows.sort((a, b) => (toDate(b.sortDate)?.getTime() || 0) - (toDate(a.sortDate)?.getTime() || 0));
+  return allRows;
+}
+
+async function writeWorkbookToTemp(workbook, filePrefix) {
+  const d = new Date();
+  const localDateStr = d.toLocaleDateString("en-CA", { timeZone: TIMEZONE });
+  const localTimeStr = d.toLocaleTimeString("en-GB", { timeZone: TIMEZONE }).replace(/:/g, "-");
+  const tmpPath = path.join(os.tmpdir(), `${filePrefix}-${localDateStr}-${localTimeStr}.xlsx`);
+  await workbook.xlsx.writeFile(tmpPath);
+  return tmpPath;
 }
 
 async function generateMasterReport() {
@@ -448,48 +492,32 @@ async function generateMasterReport() {
   });
   applyAutoFilter(stockInSheet, stockInHeaders);
 
-  // Sheet 4: Transaction History (ប្រវត្តិប្រតិបត្តិការ)
+  // Sheet 4: Transaction History (ប្រវត្តិប្រតិបត្តិការ) — Merged Single-Row Loan Records
   const historyHeaders = [
     { header: "ឈ្មោះឧបករណ៍", key: "equipmentName", width: 34, align: "left" },
-    { header: "ឈ្មោះអ្នកខ្ចី", key: "borrowerName", width: 26, align: "left" },
-    { header: "ប្រភេទប្រតិបត្តិការ", key: "type", width: 18, align: "center" },
-    { header: "ចំនួន", key: "quantity", width: 12, align: "center" },
+    { header: "ឈ្មោះអ្នកខ្ចី", key: "borrowerName", width: 28, align: "left" },
+    { header: "ចំនួន", key: "quantity", width: 14, align: "center" },
     { header: "កាលបរិច្ឆេទខ្ចី", key: "borrowedAt", width: 26, align: "center" },
-    { header: "ស្ថានភាពប្រគល់", key: "isReturned", width: 18, align: "center" },
+    { header: "ស្ថានភាពប្រគល់", key: "isReturned", width: 20, align: "center" },
     { header: "កាលបរិច្ឆេទប្រគល់", key: "returnedAt", width: 26, align: "center" },
-    { header: "អ្នកកត់ត្រា", key: "reportedBy", width: 22, align: "left" },
+    { header: "អ្នកកត់ត្រា", key: "reportedBy", width: 24, align: "left" },
   ];
   const historySheet = createStyledSheet(workbook, "ប្រវត្តិប្រតិបត្តិការ", historyHeaders);
 
-  const borrowEvents = collectBorrowEvents(items).map((e) => ({
-    ...e,
-    type: "ខ្ចី",
-    sortAt: e.borrowedAt,
-  }));
-  const returnEvents = collectReturnEvents(items).map((e) => ({
-    ...e,
-    type: "ប្រគល់",
-    sortAt: e.returnedAt,
-  }));
-  const allEvents = borrowEvents
-    .concat(returnEvents)
-    .sort((a, b) => (toDate(b.sortAt)?.getTime() || 0) - (toDate(a.sortAt)?.getTime() || 0));
+  const transactions = collectTransactionHistory(items);
 
-  allEvents.forEach((ev, index) => {
-    const isRetStr = ev.isReturned === "Yes" ? "បានប្រគល់" : ev.isReturned === "No" ? "មិនទាន់ប្រគល់" : ev.isReturned || "";
+  transactions.forEach((ev, index) => {
     const row = historySheet.addRow({
       equipmentName: ev.equipmentName,
       borrowerName: ev.borrowerName,
-      type: ev.type,
       quantity: ev.quantity,
       borrowedAt: formatTimestamp(ev.borrowedAt),
-      isReturned: isRetStr,
+      isReturned: ev.isReturned,
       returnedAt: formatTimestamp(ev.returnedAt),
       reportedBy: ev.reportedBy,
     });
     styleDataRow(row, index, historyHeaders);
-    applyOperationBadge(row.getCell("type"), ev.type);
-    applyReturnStatusBadge(row.getCell("isReturned"), isRetStr);
+    applyReturnStatusBadge(row.getCell("isReturned"), ev.isReturned);
   });
   applyAutoFilter(historySheet, historyHeaders);
 

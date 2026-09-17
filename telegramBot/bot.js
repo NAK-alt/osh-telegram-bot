@@ -706,11 +706,11 @@ bot.onText(/^\/(?:version|status)(?:@\w+)?$/i, (msg) => {
   return bot.sendMessage(
     chatId,
     `🤖 *OSH Equipment Bot — System Info*\n\n` +
-    `• *Version:* 2.2 (Middle-Aligned Khmer Excel & Asia/Phnom_Penh)\n` +
+    `• *Version:* 2.3 (Single-Row Merged Returns & Middle Alignment)\n` +
     `• *Timezone:* \`${tz}\`\n` +
     `• *Current Bot Time:* \`${timeStr}\`\n` +
     `• *Date Format:* \`dd/mm/yyyy\`\n` +
-    `• *Excel Report:* Enhanced styling, middle alignment & auto-filters\n` +
+    `• *Excel Report:* Merged single-row returns (no duplicate rows, operation column removed)\n` +
     `• *Khmer Localization:* Active`,
     { parse_mode: "Markdown" }
   );
