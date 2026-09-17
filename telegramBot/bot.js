@@ -706,10 +706,11 @@ bot.onText(/^\/(?:version|status)(?:@\w+)?$/i, (msg) => {
   return bot.sendMessage(
     chatId,
     `🤖 *OSH Equipment Bot — System Info*\n\n` +
-    `• *Version:* 2.1 (dd/mm/yyyy & Asia/Phnom_Penh)\n` +
+    `• *Version:* 2.2 (Middle-Aligned Khmer Excel & Asia/Phnom_Penh)\n` +
     `• *Timezone:* \`${tz}\`\n` +
     `• *Current Bot Time:* \`${timeStr}\`\n` +
     `• *Date Format:* \`dd/mm/yyyy\`\n` +
+    `• *Excel Report:* Enhanced styling, middle alignment & auto-filters\n` +
     `• *Khmer Localization:* Active`,
     { parse_mode: "Markdown" }
   );
