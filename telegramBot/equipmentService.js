@@ -239,8 +239,17 @@ async function findByName(equipmentName) {
 }
 
 async function getAll() {
-  const snap = await db.collection(COLLECTION).orderBy("createdAt", "desc").get();
-  return snap.docs.map((d) => sanitizeEquipment(d));
+  const snap = await db.collection(COLLECTION).get();
+  const items = snap.docs.map((d) => sanitizeEquipment(d));
+  items.sort((a, b) => {
+    const orderA = typeof a.orderIndex === "number" ? a.orderIndex : 999;
+    const orderB = typeof b.orderIndex === "number" ? b.orderIndex : 999;
+    if (orderA !== orderB) return orderA - orderB;
+    const dateA = a.createdAt ? (a.createdAt._seconds || new Date(a.createdAt).getTime()) : 0;
+    const dateB = b.createdAt ? (b.createdAt._seconds || new Date(b.createdAt).getTime()) : 0;
+    return dateB - dateA;
+  });
+  return items;
 }
 
 async function findById(id) {
@@ -291,7 +300,12 @@ async function createEquipment({ nameKhmer, nameEnglish, name, model, quantity, 
     }
   }
 
+  const currentItems = await getAll();
+  const maxOrder = currentItems.reduce((max, it) => Math.max(max, Number(it.orderIndex) || 0), 0);
+  const nextOrderIndex = maxOrder + 1;
+
   const docRef = await db.collection(COLLECTION).add({
+    orderIndex: nextOrderIndex,
     equipmentName: displayName,
     equipmentNameKhmer: nameKhmerClean || (rawName ? rawName : ""),
     equipmentNameEnglish: nameEnglishClean,

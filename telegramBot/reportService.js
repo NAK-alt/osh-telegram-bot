@@ -402,6 +402,7 @@ async function generateMasterReport() {
 
   // Sheet 1: Inventory (ស្តុកឧបករណ៍)
   const inventoryHeaders = [
+    { header: "ល.រ", key: "no", width: 8, align: "center" },
     { header: "ឈ្មោះឧបករណ៍ (ខ្មែរ)", key: "nameKhmer", width: 34, align: "left" },
     { header: "ឈ្មោះឧបករណ៍ (អង់គ្លេស)", key: "nameEnglish", width: 32, align: "left" },
     { header: "ម៉ូឌែល", key: "model", width: 18, align: "center" },
@@ -412,10 +413,19 @@ async function generateMasterReport() {
   ];
   const invSheet = createStyledSheet(workbook, "ស្តុកឧបករណ៍", inventoryHeaders);
 
-  items.forEach((item, index) => {
+  // Sort equipment strictly according to reference Excel order (1..15)
+  const sortedItems = [...items].sort((a, b) => {
+    const orderA = typeof a.orderIndex === "number" ? a.orderIndex : 999;
+    const orderB = typeof b.orderIndex === "number" ? b.orderIndex : 999;
+    if (orderA !== orderB) return orderA - orderB;
+    return (a.equipmentName || "").localeCompare(b.equipmentName || "");
+  });
+
+  sortedItems.forEach((item, index) => {
     const names = parseEquipmentNames(item);
     const statusKm = STATUS_KM[item.status] || item.status || "";
     const row = invSheet.addRow({
+      no: item.orderIndex || index + 1,
       nameKhmer: names.khmer,
       nameEnglish: names.english,
       model: item.model || "",
@@ -432,6 +442,7 @@ async function generateMasterReport() {
 
   // Sheet 2: Active Borrowers (បញ្ជីអ្នកខ្ចីសកម្ម)
   const openLoansHeaders = [
+    { header: "ល.រ", key: "no", width: 8, align: "center" },
     { header: "ឈ្មោះអ្នកខ្ចី", key: "borrowerName", width: 28, align: "left" },
     { header: "ឈ្មោះឧបករណ៍", key: "equipmentName", width: 48, align: "left" },
     { header: "ចំនួនខ្ចី", key: "remainingQuantity", width: 14, align: "center" },
@@ -443,6 +454,7 @@ async function generateMasterReport() {
   const borrowerRows = groupActiveLoansByBorrower(items);
   borrowerRows.forEach((borrower, index) => {
     const row = borrowersSheet.addRow({
+      no: index + 1,
       borrowerName: borrower.borrowerName,
       equipmentName: borrower.equipmentName,
       remainingQuantity: borrower.remainingQuantity,
@@ -455,6 +467,7 @@ async function generateMasterReport() {
 
   // Sheet 3: Stock In Log (កំណត់ហេតុបន្ថែមស្តុក)
   const stockInHeaders = [
+    { header: "ល.រ", key: "no", width: 8, align: "center" },
     { header: "ឈ្មោះឧបករណ៍", key: "equipmentName", width: 34, align: "left" },
     { header: "ចំនួនបន្ថែម", key: "addedQty", width: 14, align: "center" },
     { header: "ស្តុកចាស់សរុប", key: "oldTotal", width: 16, align: "center" },
@@ -481,6 +494,7 @@ async function generateMasterReport() {
 
   stockInEvents.forEach((ev, index) => {
     const row = stockInSheet.addRow({
+      no: index + 1,
       equipmentName: ev.equipmentName,
       addedQty: ev.addedQty,
       oldTotal: ev.oldTotal,
@@ -494,6 +508,7 @@ async function generateMasterReport() {
 
   // Sheet 4: Transaction History (ប្រវត្តិប្រតិបត្តិការ) — Merged Single-Row Loan Records
   const historyHeaders = [
+    { header: "ល.រ", key: "no", width: 8, align: "center" },
     { header: "ឈ្មោះឧបករណ៍", key: "equipmentName", width: 34, align: "left" },
     { header: "ឈ្មោះអ្នកខ្ចី", key: "borrowerName", width: 28, align: "left" },
     { header: "ចំនួន", key: "quantity", width: 14, align: "center" },
@@ -508,6 +523,7 @@ async function generateMasterReport() {
 
   transactions.forEach((ev, index) => {
     const row = historySheet.addRow({
+      no: index + 1,
       equipmentName: ev.equipmentName,
       borrowerName: ev.borrowerName,
       quantity: ev.quantity,
